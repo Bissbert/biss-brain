@@ -9,6 +9,8 @@ Stage 1 (cheap, no LLM by default beyond conflict judge):
                            older (by event time) becomes invalid from the
                            newer's valid_from; an extends edge on EXTENDS
   1c decay               — recompute decay_score (same logic as decay.py)
+  1d compact             — rebuild the FTS index in one piece, prune old
+                           table versions (no LLM, no rows change)
 
 Stage 2 (LLM, additive, no destructive edits):
   2a session arcs        — group raw chunks by session_id, distill into
@@ -56,6 +58,7 @@ from common import (  # noqa: E402
     now_unix,
     embed,
     fetch_by_ids,
+    compact_store,
     open_or_create_chunks,
     refresh_fts,
     vector_search,
@@ -1122,17 +1125,25 @@ def _stage2c_core_proposals(pdir: Path, proj: str, cfg: dict, dry_run: bool) -> 
     return queued
 
 
+def _stage1d_compact(pdir: Path, dry_run: bool) -> bool:
+    if dry_run:
+        return False
+    _, tbl = _open_lance(pdir)
+    return tbl is not None and compact_store(tbl)
+
+
 def run_stage1(pdir: Path, cfg: dict, dry_run: bool) -> dict:
     proj = pdir.name
     backlinks = _stage1a_backlinks(pdir, proj, cfg, dry_run)
     conflicts = _stage1b_conflicts(pdir, proj, cfg, dry_run)
     decayed = _stage1c_decay(pdir, cfg, dry_run)
     _stage1_mark_visited(pdir, proj, dry_run)
+    compacted = _stage1d_compact(pdir, dry_run)
     log.info(
-        "stage1 [%s] backlinks=%d conflicts=%s decayed=%d (dry_run=%s)",
-        proj, backlinks, conflicts, decayed, dry_run,
+        "stage1 [%s] backlinks=%d conflicts=%s decayed=%d compacted=%s (dry_run=%s)",
+        proj, backlinks, conflicts, decayed, compacted, dry_run,
     )
-    return {"backlinks": backlinks, "conflicts": conflicts, "decayed": decayed}
+    return {"backlinks": backlinks, "conflicts": conflicts, "decayed": decayed, "compacted": compacted}
 
 
 def run_stage2(pdir: Path, cfg: dict, dry_run: bool) -> dict:
@@ -1229,6 +1240,7 @@ def _run(args: argparse.Namespace, cfg: dict) -> int:
         # Still recompute decay so the nightly job stays useful.
         for pdir in _project_dirs(args.project):
             _stage1c_decay(pdir, cfg, args.dry_run)
+            _stage1d_compact(pdir, args.dry_run)
         return 0
 
     summary: dict[str, Any] = {}

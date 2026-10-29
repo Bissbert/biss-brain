@@ -1,17 +1,17 @@
 """FastAPI application skeleton for the biss-brain UI inspector.
 
-Phase 0: foundation routes only. Panel logic (search, timeline, scatter,
-graph, sessions) lives in their own router modules under ui/routers/.
+Phase 0: foundation routes only. Panel logic (search, review, timeline,
+sessions, status) lives in their own router modules under ui/routers/.
 Phase 1/2 agents fill those in without touching this file.
 
 Routing contract (stable for Phase 1/2):
-  GET /                        -> index.html (project picker; no ?project= required)
+  GET /                        -> index.html (overview; with ?project=, the next-session preview)
   GET /search?project=<h>&q=   -> search panel
+  GET /review?project=<h>      -> review queue (proposals, fading, replaced)
+  GET /status?project=<h>      -> brain status
   GET /sessions?project=<h>    -> sessions panel
   GET /session/<sid>?project=<h> -> session detail panel
   GET /timeline?project=<h>    -> timeline panel
-  GET /scatter?project=<h>     -> scatter panel
-  GET /graph?project=<h>       -> graph panel
   GET /chunk/<id>?project=<h>  -> chunk row as JSON
   GET /healthz                 -> {"ok": True}
   GET /static/*                -> StaticFiles
@@ -87,14 +87,13 @@ templates.env.globals["plugin_version"] = _plugin_version
 # ---------------------------------------------------------------------------
 # Panel routers – each agent owns its own file; no conflicts during parallel work
 # ---------------------------------------------------------------------------
-from ui.routers import search, sessions, timeline, scatter, graph, status  # noqa: E402
+from ui.routers import review, search, sessions, timeline, status  # noqa: E402
 
 app.include_router(search.router)
 app.include_router(sessions.router)
 app.include_router(timeline.router)
-app.include_router(scatter.router)
-app.include_router(graph.router)
 app.include_router(status.router)
+app.include_router(review.router)
 
 # ---------------------------------------------------------------------------
 # Error handlers
@@ -125,10 +124,15 @@ async def favicon() -> Any:
 @app.get("/")
 async def index(request: Request, project: str = Query("", description="Project hash")) -> Any:
     projects = discover_projects()
+    preview = None
+    if project and any(p["hash"] == project for p in projects):
+        from ui.preview import next_session
+
+        preview = next_session(project)
     return templates.TemplateResponse(
         request,
         "index.html",
-        {"projects": projects, "current_project": project or None},
+        {"projects": projects, "current_project": project or None, "preview": preview},
     )
 
 

@@ -90,7 +90,20 @@ def _table_or_none(cwd: str):
 
 
 def _recent_decisions(cwd: str, top_k: int, cfg: dict | None = None) -> list[dict]:
+    """recent_rows for cwd's store; [] when it has no chunks table."""
+    meta = open_meta(cwd)
+    try:
+        tbl = _table_or_none(cwd)
+        return recent_rows(meta, tbl, project_key(cwd), top_k, cfg) if tbl is not None else []
+    finally:
+        meta.close()
+
+
+def recent_rows(meta, tbl, proj: str, top_k: int, cfg: dict | None = None) -> list[dict]:
     """Pull recently-accessed top-tier chunks for the project.
+
+    Reads only: the UI's next-session preview calls this on a read-only
+    connection, so what it shows is what the hook injects.
 
     Drives listing from SQLite metadata (fast index scans), then fetches
     the full text for matched ids from LanceDB using a by-id filter.
@@ -100,8 +113,6 @@ def _recent_decisions(cwd: str, top_k: int, cfg: dict | None = None) -> list[dic
     higher-signal product of the dream pass and feed the model better.
     Tool/web-tainted and quarantined chunks are never injected.
     """
-    proj = project_key(cwd)
-    meta = open_meta(cwd)
     # Prefer summaries: arc/daily_summary outrank stop/subagent_stop, then pinned, then recency.
     rows = meta.execute(
         f"SELECT id, kind, ts, session_id, {temporal.VALID_FROM_SQL} FROM chunks "
@@ -114,7 +125,6 @@ def _recent_decisions(cwd: str, top_k: int, cfg: dict | None = None) -> list[dic
         (proj, top_k * 3),
     ).fetchall()
     if not rows:
-        meta.close()
         return []
 
     id_to_meta = {r[0]: {"id": r[0], "kind": r[1], "ts": r[2], "session_id": r[3], "_valid_from": r[4]}
@@ -122,11 +132,6 @@ def _recent_decisions(cwd: str, top_k: int, cfg: dict | None = None) -> list[dic
     ids = list(id_to_meta.keys())
     for cid, prov in provenance.lookup(meta, proj, ids).items():
         id_to_meta[cid]["_prov"] = prov
-    meta.close()
-
-    tbl = _table_or_none(cwd)
-    if tbl is None:
-        return []
 
     lance_rows = fetch_by_ids(tbl, ids, limit=len(ids))
     # Merge lance text into meta rows
@@ -265,6 +270,15 @@ def _core_context(cwd: str, cfg: dict) -> str:
 
 def _join(*parts: str) -> str:
     return "\n\n".join(p for p in parts if p)
+
+
+def top_k(cfg: dict) -> int:
+    return cfg["retrieve"]["session_start_top_k"]
+
+
+def session_start_context(core_ctx: str, chunks: list[dict]) -> str:
+    """What a new session starts with: core memory, then the recent memories."""
+    return _join(core_ctx, _frame_chunks(chunks, "Recent project memory (biss-brain)"))
 
 
 def _emit(event_name: str, context: str) -> None:
@@ -427,11 +441,11 @@ def main() -> int:
         return 0  # cold project, no recalled memory
 
     if mode == "session_start":
-        chunks = _recent_decisions(cwd, cfg["retrieve"]["session_start_top_k"], cfg)
+        chunks = _recent_decisions(cwd, top_k(cfg), cfg)
         # resume keeps the earlier context; startup/clear start from nothing
         S.ledger_add(proj, sid, [c["id"] for c in chunks], reset=hook.get("source") != "resume")
         S.prune_ledgers(proj)
-        ctx = _join(core_ctx, _frame_chunks(chunks, "Recent project memory (biss-brain)"))
+        ctx = session_start_context(core_ctx, chunks)
         if ctx:
             _emit("SessionStart", ctx)
         return 0

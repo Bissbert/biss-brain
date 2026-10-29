@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Review{% endblock %}
+{% block head_extra %}
+<style>
+  .review-lede { color: var(--muted); max-width: 68ch; line-height: 1.55; margin: 4px 0 32px; }
+  .review-section { margin-bottom: 48px; }
+  .review-section h2 { display: flex; align-items: baseline; gap: 10px; margin: 0 0 4px; }
+  .review-section h2 .count { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--label); font-weight: 400; }
+  .review-note { color: var(--muted); max-width: 68ch; line-height: 1.55; margin: 0 0 14px; font-size: 0.875rem; }
+  .review-empty { color: var(--label); font-size: 0.875rem; margin: 0; }
+
+  .proposals { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+  .proposal { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+  .proposal-what { flex: 1 1 40ch; line-height: 1.55; overflow-wrap: anywhere; }
+  .proposal-meta { display: block; font-size: 0.75rem; color: var(--label); margin-top: 2px; }
+  .proposal-warn { color: var(--danger); }
+  .proposal-actions { display: flex; gap: 8px; }
+  .proposal.is-done { color: var(--muted); font-size: 0.875rem; }
+
+  .pair { display: grid; grid-template-columns: 3.5em 1fr; gap: 6px 12px; margin-bottom: 20px; }
+  .pair-tag { font-size: 0.75rem; color: var(--label); padding-top: 10px; text-align: right; }
+</style>
+{% endblock %}
+{% block content %}
+<h1>Review</h1>
+<p class="review-lede">The few memories that want a decision from you. Nothing here is urgent: a fading memory
+  still turns up in search, it just ranks lower.</p>
+
+<section class="review-section" aria-labelledby="rv-proposals">
+  <h2 id="rv-proposals">Proposed for core memory <span class="count">{{ proposals | length }}</span></h2>
+  <p class="review-note">Core memory goes into every session here, so nothing joins it without your yes.</p>
+  {% if proposals %}
+  {% if not can_act %}
+  <p class="review-note">Label this project with its path on the <a href="/?project={{ project }}">overview</a>
+    to accept or reject from here, or use <code>/biss-brain:core</code> in a session.</p>
+  {% endif %}
+  <ul class="proposals">
+    {% for r in proposals %}
+    <li class="proposal" id="proposal-{{ r.id }}">
+      <div class="proposal-what">
+        {% if r.op == "remove" %}Remove <code>m:{{ r.target }}</code>{% if r.text %}: {{ r.text }}{% endif %}
+        {% else %}{{ r.text }}{% endif %}
+        <span class="proposal-meta">
+          {{ r.layer }}{% if r.op == "add" %} · {{ r.section }}{% endif %} · from {{ r.origin }}, {{ r.source }}
+          · {{ r.ts | fmt_ts }}
+          {% if r.imperative %}<span class="proposal-warn"> · reads like an instruction; check it before accepting</span>{% endif %}
+        </span>
+      </div>
+      {% if can_act %}
+      <span class="proposal-actions">
+        <button type="button" hx-post="/api/proposal/accept?project={{ project }}&id={{ r.id }}"
+                hx-target="#proposal-{{ r.id }}" hx-swap="outerHTML">Accept</button>
+        <button type="button" hx-post="/api/proposal/reject?project={{ project }}&id={{ r.id }}"
+                hx-target="#proposal-{{ r.id }}" hx-swap="outerHTML">Reject</button>
+      </span>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="review-empty">No open proposals.</p>
+  {% endif %}
+</section>
+
+<section class="review-section" aria-labelledby="rv-fading">
+  <h2 id="rv-fading">Fading <span class="count">{{ fading_total }}</span></h2>
+  <p class="review-note">Strength falls with age, and an unpinned memory fades this far in about six weeks.
+    Pin one to keep it strong, or forget it. Forget can be undone.</p>
+  {% if fading %}
+  <div class="cards">
+    {% for chunk in fading %}
+      {% with chunk=chunk, inline_forget=true %}{% include "_chunk_card.html" %}{% endwith %}
+    {% endfor %}
+  </div>
+  {% if fading_total > fading | length %}
+  <p class="review-note" style="margin-top:12px;">Showing the {{ fading | length }} faintest of {{ fading_total }}.</p>
+  {% endif %}
+  {% else %}
+  <p class="review-empty">Nothing is fading.</p>
+  {% endif %}
+</section>
+
+<section class="review-section" aria-labelledby="rv-replaced">
+  <h2 id="rv-replaced">Replaced in the last 30 days <span class="count">{{ replaced | length }}</span></h2>
+  <p class="review-note">A newer memory contradicted or updated each of these. Check the new one says what you meant.</p>
+  {% if replaced %}
+  {% for old, new in replaced %}
+  <div class="pair">
+    <span class="pair-tag">was</span>
+    {% with chunk=old %}{% include "_chunk_card.html" %}{% endwith %}
+    <span class="pair-tag">now</span>
+    {% with chunk=new %}{% include "_chunk_card.html" %}{% endwith %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="review-empty">Nothing was replaced recently.</p>
+  {% endif %}
+</section>
+{% endblock %}

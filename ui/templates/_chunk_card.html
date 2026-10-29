@@ -1,4 +1,3 @@
-{% set _sup_style = "opacity:0.45;" if chunk.is_superseded else "" %}
 {% set _salience = chunk.salience | default(0) | int %}
 {% set _recon_count = chunk.reconsolidation_count | default(0) | int %}
 {% set _round = chunk.consolidation_round | default(0) | int %}
@@ -7,128 +6,108 @@
 {% set _labile = chunk.labile_until | default(0) | int %}
 {% set _now_ts = chunk._now_ts | default(0) | int %}
 {% set _is_labile = _labile > _now_ts %}
+{% set _forgotten = chunk.forgotten | default(false) %}
+{% set _replaced_by = chunk.replaced_by | default("") %}
+{% set _replaces = chunk.replaces | default([]) %}
 
-<div class="card" id="chunk-{{ chunk.id }}" style="{{ _sup_style }}"
-     onclick="if(!event.target.closest('input,button')){this.classList.toggle('expanded');}">
+<article class="card{% if chunk.is_superseded %} is-superseded{% endif %}{% if just_forgotten %} expanded{% endif %}"
+         id="chunk-{{ chunk.id }}" data-chunk="{{ chunk.id }}">
 
-  {# Top row: checkbox + hash · kind · timestamp · score · pin/forget/neighbours #}
-  <div style="display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:8px;">
-
-    {# compose-pick checkbox #}
+  <header class="card-head">
     <input type="checkbox" class="compose-pick"
            data-id="{{ chunk.id }}" data-kind="{{ chunk.kind }}"
-           onclick="event.stopPropagation();"
-           style="flex-shrink:0;margin-top:2px;">
-
-    <code style="font-size:0.75rem;color:var(--muted);" title="{{ chunk.id }}">{{ chunk.id[:12] }}</code>
-    <span class="badge{% if chunk.kind == 'decision' %} accent{% endif %}{% if chunk.kind == 'lesson' %} accent{% endif %}">{{ chunk.kind }}</span>
+           aria-label="Select {{ chunk.id[:12] }} to compose">
+    <span class="badge{% if chunk.kind in ('decision', 'lesson') %} accent{% endif %}">{{ chunk.kind }}</span>
     {% if chunk.source in ('web', 'tool') %}
-    <span class="badge" title="provenance: {{ chunk.source }} — never auto-injected" style="font-size:0.625rem;padding:1px 5px;">source: {{ chunk.source }}</span>
+    <span class="badge" title="Came from {{ chunk.source }} output; never injected into a session on its own">source: {{ chunk.source }}</span>
     {% endif %}
-    {% if chunk.kind == 'lesson' %}
-    <span class="badge accent" style="font-size:0.625rem;padding:1px 5px;border-color:var(--teal);color:var(--teal);">lesson</span>
-    {% endif %}
-    <span style="font-family:var(--font-mono);font-feature-settings:'tnum';color:var(--muted);font-size:0.75rem;">
-      {{ chunk.ts | fmt_ts }}
-    </span>
-    {% if chunk.session_id %}
-    <code style="font-size:0.6875rem;color:var(--label);">sess {{ chunk.session_id[:8] }}</code>
-    {% endif %}
-    {% if chunk.pinned %}
-    <span style="font-size:0.6875rem;letter-spacing:0.10em;text-transform:uppercase;color:var(--teal);" title="pinned">· pinned</span>
-    {% endif %}
-    {% if chunk.is_superseded %}
-    <span style="font-size:0.6875rem;letter-spacing:0.10em;text-transform:uppercase;color:var(--danger);">· superseded</span>
-    {% endif %}
+    <time class="card-ts" datetime="{{ chunk.ts }}">{{ chunk.ts | fmt_ts }}</time>
+    {% if chunk.pinned %}<span class="flag flag-keep">pinned</span>{% endif %}
     {% if _is_labile %}
-    <span class="badge" style="border-color:rgba(250,204,21,0.5);color:rgb(250,204,21);font-size:0.625rem;padding:1px 5px;"
-          title="labile until {{ _labile | fmt_ts }}">labile</span>
+    <span class="badge badge-labile" title="Open to revision until {{ _labile | fmt_ts }}">labile</span>
+    {% endif %}
+    {% if _forgotten %}
+    <span class="flag flag-gone">forgotten</span>
+    {% elif _replaced_by %}
+    <span class="flag flag-gone">replaced by <code title="{{ _replaced_by }}">{{ _replaced_by[:12] }}</code></span>
+    {% elif chunk.is_superseded %}
+    <span class="flag flag-gone">superseded</span>
+    {% endif %}
+    {% if _replaces %}
+    <span class="flag">replaces {% for old in _replaces[:3] %}<code title="{{ old }}">{{ old[:12] }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% if _replaces | length > 3 %} +{{ _replaces | length - 3 }}{% endif %}</span>
     {% endif %}
 
-    <span style="margin-left:auto;display:flex;gap:8px;align-items:center;">
+    <span class="card-actions">
       {% if chunk.score is not none %}
-      <span style="font-family:var(--font-mono);font-feature-settings:'tnum';color:var(--muted);font-size:0.75rem;">
-        {{ "%.3f"|format(chunk.score) }}
-      </span>
+      <span class="card-score" title="Match score">{{ "%.3f"|format(chunk.score) }}</span>
       {% endif %}
-
-      {# neighbours button #}
-      <button
-        hx-get="/api/neighbours?project={{ project }}&id={{ chunk.id }}"
-        hx-target="#nbr-{{ chunk.id }}"
-        hx-swap="innerHTML"
-        onclick="event.stopPropagation();"
-        style="font-size:0.6875rem;letter-spacing:0.10em;text-transform:uppercase;padding:3px 9px;color:var(--muted);">
-        nbr
-      </button>
-
-      <button
-        hx-post="/api/{{ 'unpin' if chunk.pinned else 'pin' }}?project={{ project }}&id={{ chunk.id }}"
-        hx-target="#chunk-{{ chunk.id }}"
-        hx-swap="outerHTML"
-        onclick="event.stopPropagation();"
-        style="font-size:0.6875rem;letter-spacing:0.10em;text-transform:uppercase;padding:3px 9px;">
-        {{ 'unpin' if chunk.pinned else 'pin' }}
-      </button>
       {% if not chunk.is_superseded %}
-      <button
-        hx-post="/api/forget?project={{ project }}&id={{ chunk.id }}"
-        hx-target="#chunk-{{ chunk.id }}"
-        hx-swap="outerHTML"
-        onclick="event.stopPropagation();"
-        style="font-size:0.6875rem;letter-spacing:0.10em;text-transform:uppercase;padding:3px 9px;color:var(--danger);border-color:rgba(244,63,94,0.3);">
-        forget
-      </button>
+      <button type="button" data-action="pin"
+              hx-post="/api/{{ 'unpin' if chunk.pinned else 'pin' }}?project={{ project }}&id={{ chunk.id }}"
+              hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">{{ 'Unpin' if chunk.pinned else 'Pin' }}</button>
       {% endif %}
+      {% if inline_forget and not chunk.is_superseded %}
+      <button type="button" class="danger"
+              hx-post="/api/forget?project={{ project }}&id={{ chunk.id }}"
+              hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">Forget</button>
+      {% endif %}
+      <button type="button" class="card-toggle" data-action="toggle"
+              aria-expanded="{{ 'true' if just_forgotten else 'false' }}" aria-controls="more-{{ chunk.id }}">Details</button>
     </span>
-  </div>
+  </header>
 
-  {# body text — CSS toggle expand via .expanded on parent .card #}
-  <div class="card-body"
-       style="line-height:1.6;color:var(--text);font-size:0.9375rem;cursor:pointer;{% if chunk.is_superseded %}text-decoration:line-through;{% endif %}"
-       title="Click to expand">
+  <div class="card-body">
     {% if chunk.text_html %}{{ chunk.text_html | safe }}{% if chunk.text | length > 400 %}…{% endif %}{% else %}{{ chunk.text[:400] | e }}{% if chunk.text | length > 400 %}…{% endif %}{% endif %}
   </div>
 
-  {# v0.5 row 1: salience dot row + labile countdown + reconsolidation dots #}
-  <div style="margin-top:8px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-    {# salience: 10 dots filled proportionally #}
-    <span style="font-family:var(--font-mono);font-size:0.6875rem;color:var(--label);display:inline-flex;align-items:center;gap:4px;">
-      <span style="letter-spacing:0.02em;">sal</span>
-      {% set _filled = (_salience // 10) | int %}
-      {% for i in range(10) %}
-        {% if i < _filled %}
-          <span style="display:inline-block;width:5px;height:5px;background:var(--accent);border-radius:50%;"></span>
-        {% else %}
-          <span style="display:inline-block;width:5px;height:5px;background:var(--rule-strong);border-radius:50%;"></span>
-        {% endif %}
-      {% endfor %}
-      <span style="margin-left:2px;color:var(--muted);">{{ _salience }}</span>
-    </span>
-
-    {% if _recon_count > 0 %}
-    <span style="font-family:var(--font-mono);font-size:0.6875rem;color:var(--label);display:inline-flex;align-items:center;gap:3px;">
-      <span>recon</span>
-      {% set _dots = [_recon_count, 5] | min %}
-      {% for i in range(_dots) %}
-        <span style="display:inline-block;width:4px;height:4px;background:var(--teal);border-radius:50%;"></span>
-      {% endfor %}
-    </span>
-    {% endif %}
-  </div>
-
-  {# v0.5 row 2: decay · retrieved local/total · round #}
-  {% if chunk.decay_score is not none %}
-  <div style="margin-top:4px;font-family:var(--font-mono);font-size:0.6875rem;color:var(--label);font-feature-settings:'tnum';letter-spacing:0.02em;">
-    decay {{ "%.2f"|format(chunk.decay_score) }}
-    · retrieved {{ _local }} local of {{ _total }} total
-    {% if _round > 0 %}· round {{ _round }}{% endif %}
-    {% if chunk.kind == 'lesson' %}
-    <span class="badge" style="font-size:0.5625rem;padding:0 4px;border-color:var(--teal);color:var(--teal);margin-left:4px;">lesson</span>
-    {% endif %}
-  </div>
+  {% if just_forgotten %}
+  <p class="card-undo" role="status">
+    Forgotten. It stays on disk and out of every session.
+    <button type="button" autofocus data-action="restore"
+            hx-post="/api/unforget?project={{ project }}&id={{ chunk.id }}"
+            hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">Undo</button>
+  </p>
   {% endif %}
 
-  {# neighbours target div — filled by HTMX #}
-  <div id="nbr-{{ chunk.id }}"></div>
-</div>
+  <div class="card-more" id="more-{{ chunk.id }}">
+    <p class="card-meta">
+      <span class="meter" title="How much this mattered when it was written, 1 to 10">
+        salience
+        {% set _filled = [_salience, 10] | min %}
+        <span class="dots" aria-hidden="true">{% for i in range(10) %}<i{% if i < _filled %} class="on"{% endif %}></i>{% endfor %}</span>
+        <span>{{ _salience }}</span>
+      </span>
+      {% if _recon_count > 0 %}
+      <span class="meter" title="Times this was revised after being recalled">
+        reconsolidated <span>{{ _recon_count }}×</span>
+      </span>
+      {% endif %}
+    </p>
+    {% if chunk.decay_score is not none %}
+    <p class="card-meta">
+      decay {{ "%.2f"|format(chunk.decay_score) }}
+      · retrieved {{ _local }} local of {{ _total }} total
+      {% if _round > 0 %}· round {{ _round }}{% endif %}
+    </p>
+    {% endif %}
+    <p class="card-meta">
+      id <code>{{ chunk.id }}</code>
+      {% if chunk.session_id %}· session <code>{{ chunk.session_id[:8] }}</code>{% endif %}
+    </p>
+    <p class="card-tools">
+      <button type="button"
+              hx-get="/api/neighbours?project={{ project }}&id={{ chunk.id }}"
+              hx-target="#nbr-{{ chunk.id }}" hx-swap="innerHTML">Similar notes</button>
+      {% if not chunk.is_superseded %}
+      <button type="button" class="danger" data-action="forget"
+              hx-post="/api/forget?project={{ project }}&id={{ chunk.id }}"
+              hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">Forget</button>
+      {% elif _forgotten %}
+      <button type="button" data-action="restore"
+              hx-post="/api/unforget?project={{ project }}&id={{ chunk.id }}"
+              hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">Restore</button>
+      {% endif %}
+    </p>
+    <div id="nbr-{{ chunk.id }}"></div>
+  </div>
+</article>

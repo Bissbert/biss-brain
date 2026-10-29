@@ -3,11 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>biss-brain inspector</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+  <title>{% block title %}Inspector{% endblock %} · biss-brain</title>
+  <link rel="stylesheet" href="/static/fonts/fonts.css">
+  <script src="/static/htmx.min.js" defer></script>
   {% block head_extra %}{% endblock %}
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -19,8 +17,9 @@
       --rule-strong: rgba(148,163,184,0.32);
       --text: #e2e8f0;
       --muted: #94a3b8;
-      --label: #64748b;
+      --label: #7c8aa0;
       --accent: #9333ea;
+      --accent-ink: #c084fc;
       --accent-hover: #a855f7;
       --teal: #2dd4bf;
       --danger: #f43f5e;
@@ -56,7 +55,16 @@
       transition: border-color .12s, color .12s;
     }
     a:hover { border-bottom-color: var(--accent); }
-    a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    a:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible,
+    textarea:focus-visible, summary:focus-visible, main:focus-visible {
+      outline: 2px solid var(--accent-ink); outline-offset: 2px;
+    }
+    main:focus:not(:focus-visible) { outline: none; }
+    .skip-link {
+      position: absolute; left: 16px; top: -48px; z-index: 300;
+      background: var(--surface); border: 1px solid var(--accent-ink); padding: 8px 14px;
+    }
+    .skip-link:focus { top: 8px; }
 
     nav {
       position: sticky; top: 0; z-index: 100;
@@ -100,7 +108,7 @@
       background-repeat: no-repeat;
       cursor: pointer;
     }
-    nav select:focus { outline: none; border-bottom-color: var(--accent); }
+    nav select:focus { border-bottom-color: var(--accent); }
 
     nav .nav-links { display: flex; gap: 24px; margin-left: auto; }
     nav .nav-links a {
@@ -132,9 +140,13 @@
     h2 { font-size: 1.25rem; line-height: 1.3; margin-bottom: 14px; }
     h3 { font-size: 1rem; line-height: 1.35; margin-bottom: 10px; }
 
+    .visually-hidden {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+    }
     .label, .smallcaps {
       font-family: var(--font-body);
-      font-size: 0.6875rem;
+      font-size: 0.75rem;
       font-weight: 500;
       letter-spacing: 0.12em;
       text-transform: uppercase;
@@ -160,6 +172,7 @@
       font-weight: 500;
       letter-spacing: 0.10em;
       text-transform: lowercase;
+      font-size: 0.75rem;
       padding: 1px 7px;
       border: 1px solid var(--rule);
       border-radius: 0;
@@ -168,7 +181,7 @@
     }
     .badge.accent {
       border-color: var(--accent);
-      color: var(--accent);
+      color: var(--accent-ink);
       background: transparent;
     }
 
@@ -199,8 +212,7 @@
       letter-spacing: 0.04em;
       transition: border-color .12s, color .12s;
     }
-    button:hover { border-color: var(--accent); color: var(--accent); }
-    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    button:hover { border-color: var(--accent); color: var(--accent-ink); }
 
     input[type="text"], input[type="search"], input[type="number"], input[type="email"] {
       background: transparent;
@@ -211,7 +223,6 @@
     }
     input[type="text"]:focus, input[type="search"]:focus,
     input[type="number"]:focus, input[type="email"]:focus {
-      outline: none;
       border-bottom-color: var(--accent);
     }
 
@@ -230,7 +241,7 @@
       background-size: 5px 5px, 5px 5px;
       background-repeat: no-repeat;
     }
-    select:focus { outline: none; border-bottom-color: var(--accent); }
+    select:focus { border-bottom-color: var(--accent); }
 
     input[type="checkbox"] {
       appearance: none;
@@ -270,15 +281,51 @@
       padding: 10px 32px; display: none; align-items: center; gap: 16px;
     }
     #compose-bar.visible { display: flex; }
-    .card { transition: max-height .15s; }
-    .card-body { max-height: 4.5em; overflow: hidden; }
+
+    /* Chunk card: one scannable row; the metadata and destructive actions fold */
+    .card-head { display: flex; align-items: baseline; gap: 8px 14px; flex-wrap: wrap; margin-bottom: 8px; }
+    .card-ts, .card-score {
+      font-family: var(--font-mono); font-feature-settings: "tnum";
+      font-size: 0.75rem; color: var(--muted);
+    }
+    .flag { font-size: 0.75rem; color: var(--label); }
+    .flag code { font-size: 0.75rem; color: var(--muted); }
+    .flag-keep { color: var(--teal); }
+    .flag-gone { color: var(--danger); }
+    .badge-labile { border-color: rgba(250,204,21,0.5); color: #facc15; }
+    .card-actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+    .card-actions button, .card-tools button, .card-undo button { font-size: 0.75rem; padding: 3px 10px; }
+    .card-body { line-height: 1.6; font-size: 0.9375rem; max-height: 4.8em; overflow: hidden; cursor: pointer; }
     .card.expanded .card-body { max-height: none; }
+    .card.is-superseded .card-body {
+      color: var(--muted);
+      text-decoration: line-through; text-decoration-color: var(--rule-strong);
+    }
+    .card-more { display: none; margin-top: 10px; }
+    .card.expanded .card-more { display: block; }
+    .card-meta {
+      font-family: var(--font-mono); font-feature-settings: "tnum";
+      font-size: 0.75rem; color: var(--label); margin: 4px 0;
+    }
+    .card-meta code { font-size: 0.75rem; color: var(--muted); }
+    .meter { display: inline-flex; align-items: center; gap: 6px; margin-right: 18px; }
+    .meter > span:last-child { color: var(--muted); }
+    .dots { display: inline-flex; gap: 3px; }
+    .dots i { width: 5px; height: 5px; border-radius: 50%; background: var(--rule-strong); }
+    .dots i.on { background: var(--accent-ink); }
+    .card-tools { display: flex; gap: 8px; margin-top: 10px; }
+    .card-undo {
+      display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+      margin-top: 10px; font-size: 0.8125rem; color: var(--muted);
+    }
+    button.danger { color: var(--danger); border-color: rgba(244,63,94,0.35); }
+    button.danger:hover { color: var(--danger); border-color: var(--danger); }
 
     /* B3: status pill in nav */
     .nav-pill {
       display: inline-flex; align-items: center; gap: 5px;
       font-family: var(--font-mono);
-      font-size: 0.625rem;
+      font-size: 0.75rem;
       font-weight: 500;
       letter-spacing: 0.08em;
       text-transform: uppercase;
@@ -303,21 +350,52 @@
     /* B3: Version badge in nav */
     .nav-version {
       font-family: var(--font-mono);
-      font-size: 0.5625rem;
+      font-size: 0.75rem;
       color: var(--label);
       letter-spacing: 0.06em;
       border: 1px solid var(--rule);
       padding: 1px 5px;
       background: transparent;
     }
+
+    .nav-help { padding: 2px 9px; font-family: var(--font-mono); color: var(--muted); }
+    #help-dialog {
+      margin: auto; max-width: 560px; width: calc(100% - 32px); max-height: calc(100% - 64px);
+      background: var(--surface); color: var(--text); border: 1px solid var(--rule-strong);
+      padding: 24px 28px;
+    }
+    #help-dialog::backdrop { background: rgba(5,5,10,0.7); }
+    #help-dialog h2 { font-size: 1rem; margin: 0 0 10px; }
+    #help-dialog h2 + * { margin-bottom: 22px; }
+    #help-dialog table { border-collapse: collapse; width: 100%; }
+    #help-dialog td { padding: 4px 16px 4px 0; vertical-align: baseline; }
+    #help-dialog kbd {
+      font-family: var(--font-mono); font-size: 0.75rem;
+      border: 1px solid var(--rule-strong); padding: 0 5px;
+    }
+    #help-dialog dt { font-weight: 600; margin-top: 10px; }
+    #help-dialog dd { color: var(--muted); line-height: 1.55; }
+    #help-dialog .help-close { float: right; }
+
+    @media (max-width: 1000px) {
+      nav { height: auto; flex-wrap: wrap; gap: 10px 18px; padding: 10px 16px; }
+      nav select { max-width: 200px; }
+      nav .nav-links { margin-left: 0; width: 100%; gap: 18px; overflow-x: auto; padding-bottom: 2px; }
+      main { padding: 24px 16px 80px; }
+      #compose-bar { padding: 10px 16px; }
+    }
   </style>
 </head>
 <body>
-  <nav>
+  <a class="skip-link" href="#main">Skip to content</a>
+  {% set _path = request.url.path if request is defined and request else "" %}
+  {% set _q = "?project=" ~ current_project if current_project else "" %}
+  <nav aria-label="Main">
     <span class="brand">biss-brain</span>
     {% if plugin_version is defined and plugin_version %}<span class="nav-version">v{{ plugin_version }}</span>{% endif %}
     <form method="get" action="/" style="display:contents">
-      <select name="project" onchange="this.form.submit()" title="Switch project">
+      <label class="visually-hidden" for="nav-project">Project</label>
+      <select id="nav-project" name="project" onchange="this.form.submit()">
         <option value="">— pick project —</option>
         {% for p in projects %}
         <option value="{{ p.hash }}"
@@ -334,17 +412,55 @@
     </a>
     {% endif %}
     <div class="nav-links">
-      <a href="/search{% if current_project %}?project={{ current_project }}{% endif %}">Search</a>
-      <a href="/sessions{% if current_project %}?project={{ current_project }}{% endif %}">Sessions</a>
-      <a href="/timeline{% if current_project %}?project={{ current_project }}{% endif %}">Timeline</a>
-      <a href="/scatter{% if current_project %}?project={{ current_project }}{% endif %}">Scatter</a>
-      <a href="/graph{% if current_project %}?project={{ current_project }}{% endif %}">Graph</a>
-      <a href="/status{% if current_project %}?project={{ current_project }}{% endif %}">Status</a>
+      {% for href, name in [("/", "Overview"), ("/search", "Search"), ("/review", "Review"),
+                            ("/sessions", "Sessions"), ("/timeline", "Timeline"), ("/status", "Status")] %}
+      {% if current_project or href in ("/", "/search") %}
+      {% set _on = _path == href or (href == "/sessions" and _path.startswith("/session/")) %}
+      <a href="{{ href }}{{ _q }}"{% if _on %} class="active" aria-current="page"{% endif %}>{{ name }}</a>
+      {% endif %}
+      {% endfor %}
+      <button type="button" class="nav-help" data-action="help" aria-haspopup="dialog"
+              aria-keyshortcuts="?" aria-label="Shortcuts and terms">?</button>
     </div>
   </nav>
-  <main>
+  <main id="main" tabindex="-1">
     {% block content %}{% endblock %}
   </main>
+  <dialog id="help-dialog" aria-labelledby="help-h">
+    <form method="dialog"><button class="help-close" aria-label="Close">Close</button></form>
+    <h2 id="help-h">Keyboard</h2>
+    <table>
+      <tr><td><kbd>/</kbd></td><td>Search</td></tr>
+      <tr><td><kbd>j</kbd> <kbd>k</kbd></td><td>Next and previous memory</td></tr>
+      <tr><td><kbd>o</kbd></td><td>Open or close its details</td></tr>
+      <tr><td><kbd>p</kbd></td><td>Pin or unpin it</td></tr>
+      <tr><td><kbd>f</kbd></td><td>Forget it (undo for 10 seconds)</td></tr>
+      <tr><td><kbd>c</kbd></td><td>Select it to compose</td></tr>
+      <tr><td><kbd>g</kbd> then <kbd>h</kbd> <kbd>r</kbd> <kbd>s</kbd> <kbd>t</kbd></td><td>Overview, Review, Sessions, Timeline</td></tr>
+      <tr><td><kbd>?</kbd></td><td>This help</td></tr>
+    </table>
+    <h2>Terms</h2>
+    <dl>
+      <dt>Salience</dt>
+      <dd>How much a memory mattered when it was written, 1 to 10: longer and more novel notes score higher.</dd>
+      <dt>Decay</dt>
+      <dd>Strength that falls with age, to about a third after 30 days. Pinning multiplies it by
+        five. A faded memory ranks lower but still turns up in search.</dd>
+      <dt>Labile</dt>
+      <dd>Just recalled, so open to revision for a while: new evidence in that window updates the memory
+        instead of piling up beside it.</dd>
+      <dt>Reconsolidated</dt>
+      <dd>How many times a memory was revised that way after being recalled.</dd>
+      <dt>Round</dt>
+      <dd>The nightly dream folds memories into summaries: round 1 is an arc of related notes, round 2 a
+        summary of arcs.</dd>
+      <dt>Replaced</dt>
+      <dd>A newer memory contradicted or updated this one. It stays on disk and out of every session.</dd>
+      <dt>DMN</dt>
+      <dd>Idle-time maintenance, named after the brain's default mode network: when the machine is quiet
+        it strengthens links between memories recalled together.</dd>
+    </dl>
+  </dialog>
   <div id="compose-bar">
     <span class="count">0 selected</span>
     <button id="compose-go">Compose &rarr;</button>
@@ -365,7 +481,7 @@
           var depth = d.edge_queue_depth != null ? d.edge_queue_depth : '?';
           var cliFails = d.cli_failures_24h || 0;
           var label = stage + ' · ' + depth;
-          if (cliFails > 0) label += ' · CLI×' + cliFails;
+          if (cliFails > 0) label += ' · ' + cliFails + (cliFails === 1 ? ' CLI failure' : ' CLI failures');
           pillText.textContent = label;
           pill.className = 'nav-pill';
           if (cliFails > 0 || d.dream_error) pill.classList.add('pill-error');

@@ -57,6 +57,30 @@ sequenceDiagram
     B-->>CC: the WAL decision, with date and source
 ```
 
+## Built like a memory, not a log
+
+Most memory tools append notes to a file or a vector store and search them. That works for a
+week. After that the store fills with near-duplicates, old facts sit next to the ones that replaced
+them, and nothing tells the important from the incidental. Human memory solves these problems
+with a handful of known mechanisms, and biss-brain borrows them:
+
+| In the brain | In biss-brain | Default |
+|---|---|---|
+| **Encoding.** An experience is stored as its gist, not a recording. | A finished stretch of conversation is distilled into a few typed notes (decision, lesson, schema, task), each with its source and date. | on |
+| **Salience.** Novel experiences are encoded more strongly. | Every note gets a salience score from 1 to 10, from how new it is next to recent notes and how much it says. You can filter search by it. | on |
+| **Consolidation in sleep.** The hippocampus replays the day and the cortex keeps the pattern. | The nightly *dream* pass condenses each session into an arc (round 1) and, if you want it, each day into a summary of arcs (round 2). A new session starts from arcs before raw notes. | on; daily summary opt-in |
+| **Reconsolidation.** A recalled memory becomes editable for a while, then settles again. | A recalled note stays *labile* for five minutes. If what you say next revises it, the note is updated in place, not stored again beside itself. A note revised five times is promoted to a lesson. | on |
+| **The forgetting curve.** Unused memories fade but are rarely erased. | Strength falls exponentially with age, pinned notes are kept five times stronger, and faint notes rank lower. Nothing is deleted. The UI lists what is fading so you can pin or forget it. | on |
+| **Hebbian learning.** Cells that fire together wire together. | Notes recalled together three times or more are linked, so recalling one surfaces the others through `related_to`. | on |
+| **Default mode network.** The resting brain does its own upkeep. | The dream pass makes those links nightly. An idle-time daemon can also make them during the day, between your sessions, and refresh the neighbours of new notes, with no model calls. | opt-in (`--with-dmn`) |
+| **Memory updating.** A new fact overrides the old one, and you still remember there was an old one. | A judge compares each new note with its nearest older ones. A contradicted fact is marked replaced and drops out of recall, and its card shows what replaced it. | on |
+| **Source monitoring.** Remembering *where* you learnt something, not only what. | Every note carries its origin. Notes drawn from tool output or web pages rank lower, are never injected on their own, and a low-trust note that reads like an instruction is quarantined. | on |
+| **A sense of self.** A small set of facts that are always present. | Core memory is injected into every session, and nothing joins it without your yes. | on |
+
+In v0.7 each mechanism that could be measured was switched off in turn against a frozen question
+suite ([docs/eval/v0.7-ablation.md](docs/eval/v0.7-ablation.md)). One failed: *retrieval-induced forgetting*, where recalling a memory suppresses its rivals, made
+answers worse and slowed every read, so it is off.
+
 ## Requirements
 
 - **macOS.** The nightly jobs use launchd. The hooks may work elsewhere, but only macOS is tested.
@@ -102,7 +126,8 @@ follows the new version by itself.
   `<private>…</private>` to keep it out entirely.
 - **Scoped.** Your home folder itself, `~/Downloads`, `~/Library`, `~/.claude` and `/tmp` are
   excluded by default. Drop a `.biss-brain-ignore` file in any project to switch it off there.
-- **Local UI.** The web UI binds to `127.0.0.1` only; it loads one chart library from a CDN.
+- **Local UI.** The web UI binds to `127.0.0.1` only and loads nothing from the internet; its
+  scripts and fonts ship with the plugin.
 
 ## Commands
 
@@ -141,17 +166,20 @@ follows the new version by itself.
 
 `/biss-brain:ui` starts a local FastAPI server (random free port, `127.0.0.1` only) and opens your browser. Re-running the command reuses the live server. `/biss-brain:ui --stop` shuts it down.
 
-Five panels:
+Press `?` on any page for the keyboard shortcuts and a glossary of the terms the UI uses.
 
-| Panel | What it shows |
+| Page | What it is for |
 |---|---|
-| **Search** | Hybrid BM25+vector query over the project, with kind filter, pin/unpin, forget. |
-| **Sessions** | Index of recent sessions; per-session replay with chronological chunks, agent lanes, and supersession chains. |
-| **Timeline** | Stacked daily histogram of captures by kind, plus mean decay over time. |
-| **Scatter** | UMAP 2D projection of the project's embeddings, colored by kind, sized by decay, click to inspect. Cached at `ui/projections/<hash>_proj.parquet` with 1-hour TTL and incremental `umap.transform()` for new chunks. |
-| **Graph** | A-MEM backlink network rendered with Cytoscape (cola force layout), hub detection, neighborhood expansion. |
+| **Overview** | What the next session in this project starts with: the core notes and memories the session-start hook would inject, and the exact text, read without side effects. Below it, every project with its size and last activity. |
+| **Search** | Hybrid search over the project, with filters for kind, date, session, salience and consolidation round. Each card can be pinned or forgotten (forget can be undone), and says what it replaced or what replaced it. |
+| **Review** | The few things that want a decision: core-memory proposals to accept or reject, the faintest fading memories to pin or forget, and facts replaced in the last 30 days next to what replaced them. |
+| **Sessions** | Recent sessions, and a replay of each one: its notes in order, its subagents, and what each note replaced. |
+| **Timeline** | Captures per day by kind, and how strength fades over time. |
+| **Status** | The flush daemon, the queue, the nightly dream and idle-time maintenance, and the most recent model-call failure, if any. |
 
-The UI is read-only by design except for pin/unpin/forget actions, which update SQLite + LanceDB the same way the slash commands do. Cytoscape is vendored under `ui/static/`; Observable Plot loads from CDN. The server runs detached, survives terminal exit, and writes to `~/.claude/brain/ui.log`.
+The UI only reads, except for pin, forget, labelling a project with its path, and accepting or
+rejecting core proposals, which go through the same code as the slash commands. The server runs
+detached, survives the terminal closing, and logs to `~/.claude/brain/ui.log`.
 
 ## Core memory
 

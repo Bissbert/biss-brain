@@ -5,14 +5,14 @@
  *   /       focus the search input
  *   j / k   next / prev card (highlights with .is-current)
  *   p       toggle pin on current card
- *   f       forget current card (if forget button present)
- *   o       toggle .expanded on current card
+ *   f       forget current card (Undo appears on the card for 10 s)
+ *   o       open or close the current card's details
  *   c       toggle compose checkbox on current card
  *   g s     navigate to /sessions
  *   g t     navigate to /timeline
- *   g x     navigate to /scatter
- *   g r     navigate to /graph
  *   g h     navigate to / (home)
+ *   g r     navigate to /review
+ *   ?       open the shortcuts and terms dialog
  *   Escape  clear focus / close compose drawer
  *
  * Compose bar: appears when any .compose-pick checkbox is checked.
@@ -157,6 +157,8 @@
   document.addEventListener("keydown", function (e) {
     // Always handle Escape regardless of focus
     if (e.key === "Escape") {
+      var help = document.getElementById("help-dialog");
+      if (help && help.open) return;  // the dialog closes itself
       var drawer = document.getElementById("compose-drawer");
       if (drawer) { drawer.remove(); return; }
       if (document.activeElement) document.activeElement.blur();
@@ -173,9 +175,8 @@
       switch (e.key) {
         case "s": e.preventDefault(); _goTo("/sessions"); return;
         case "t": e.preventDefault(); _goTo("/timeline"); return;
-        case "x": e.preventDefault(); _goTo("/scatter"); return;
-        case "r": e.preventDefault(); _goTo("/graph"); return;
         case "h": e.preventDefault(); _goTo("/"); return;
+        case "r": e.preventDefault(); _goTo("/review"); return;
       }
       return;
     }
@@ -189,6 +190,11 @@
 
     // ── Single-key bindings ─────────────────────────────────────────────────
     switch (e.key) {
+      case "?":
+        e.preventDefault();
+        _openHelp();
+        return;
+
       case "/":
         e.preventDefault();
         var searchInput = document.querySelector('input[name="q"]');
@@ -205,36 +211,15 @@
         _navigate(-1);
         return;
 
-      case "p": {
-        e.preventDefault();
-        var card = _currentCard();
-        if (!card) return;
-        // Find pin/unpin button (contains 'pin' text)
-        var btns = Array.from(card.querySelectorAll("button"));
-        var pinBtn = btns.find(function (b) {
-          var t = (b.textContent || "").trim().toLowerCase();
-          return t === "pin" || t === "unpin";
-        });
-        if (pinBtn) pinBtn.click();
-        return;
-      }
-
-      case "f": {
-        e.preventDefault();
-        var card = _currentCard();
-        if (!card) return;
-        var btns = Array.from(card.querySelectorAll("button"));
-        var forgetBtn = btns.find(function (b) {
-          return (b.textContent || "").trim().toLowerCase() === "forget";
-        });
-        if (forgetBtn) forgetBtn.click();
-        return;
-      }
-
+      case "p":
+      case "f":
       case "o": {
         e.preventDefault();
         var card = _currentCard();
-        if (card) card.classList.toggle("expanded");
+        if (!card) return;
+        var action = { p: "pin", f: "forget", o: "toggle" }[e.key];
+        var btn = card.querySelector('button[data-action="' + action + '"]');
+        if (btn) btn.click();
         return;
       }
 
@@ -252,6 +237,17 @@
     }
   });
 
+  // ── Help dialog ────────────────────────────────────────────────────────────
+
+  function _openHelp() {
+    var d = document.getElementById("help-dialog");
+    if (d && !d.open && typeof d.showModal === "function") d.showModal();
+  }
+
+  document.addEventListener("click", function (e) {
+    if (e.target && e.target.closest && e.target.closest('button[data-action="help"]')) _openHelp();
+  });
+
   // ── Compose bar event delegation ───────────────────────────────────────────
 
   document.addEventListener("change", function (e) {
@@ -266,6 +262,41 @@
       e.preventDefault();
       _composeSelected();
     }
+  });
+
+  // ── Card details toggle ────────────────────────────────────────────────────
+
+  function _toggleCard(card) {
+    var open = card.classList.toggle("expanded");
+    var btn = card.querySelector('button[data-action="toggle"]');
+    if (btn) btn.setAttribute("aria-expanded", open ? "true" : "false");
+  }
+
+  document.addEventListener("click", function (e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    var toggle = t.closest('button[data-action="toggle"]');
+    if (toggle) { _toggleCard(toggle.closest(".card")); return; }
+    // Clicking the text itself also opens it, unless the reader is selecting.
+    var body = t.closest(".card-body");
+    if (body && !String(window.getSelection() || "")) _toggleCard(body.closest(".card"));
+  });
+
+  // A swapped card keeps the keyboard cursor, and its undo offer lapses after 10 s.
+  document.addEventListener("htmx:beforeSwap", function (e) {
+    var el = e.detail && e.detail.target;
+    window._bbCurrent = el && el.classList && el.classList.contains("is-current") ? el.id : null;
+  });
+  document.addEventListener("htmx:afterSettle", function (e) {
+    if (window._bbCurrent) {
+      var card = document.getElementById(window._bbCurrent);
+      if (card) card.classList.add("is-current");
+      window._bbCurrent = null;
+    }
+    document.querySelectorAll(".card-undo:not([data-timed])").forEach(function (row) {
+      row.setAttribute("data-timed", "");
+      setTimeout(function () { if (row.isConnected) row.remove(); }, 10000);
+    });
   });
 
   // Initial bar state in case of page reload with checkboxes pre-checked

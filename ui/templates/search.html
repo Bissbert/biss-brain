@@ -12,6 +12,7 @@
 {% block content %}
 <style>
   .search-grid { display:grid; grid-template-columns:200px 1fr; gap:48px; align-items:start; }
+  @media (max-width: 1000px) { .search-grid { grid-template-columns:1fr; gap:24px; } }
   .search-margin .label { margin-bottom:12px; }
   .search-margin .meta {
     font-family:var(--font-mono); font-size:0.8125rem; color:var(--text);
@@ -44,7 +45,6 @@
     font-size: 0.8125rem;
   }
   input[type="date"]:focus {
-    outline: none;
     border-bottom-color: var(--accent);
   }
 
@@ -83,13 +83,13 @@
       <input type="hidden" name="project" value="{{ current_project }}">
 
       <div class="field grow">
-        <span class="label">Query</span>
-        <input type="text" name="q" value="{{ q }}" placeholder="Search chunks…" autocomplete="off">
+        <label class="label" for="f-q">Query</label>
+        <input id="f-q" type="text" name="q" value="{{ q }}" placeholder="Search chunks…" autocomplete="off">
       </div>
 
       <div class="field">
-        <span class="label">Kind</span>
-        <select name="kind">
+        <label class="label" for="f-kind">Kind</label>
+        <select id="f-kind" name="kind">
           <option value="">all kinds</option>
           {% for k in kinds_present %}
           <option value="{{ k }}" {% if k == kind %}selected{% endif %}>{{ k }}</option>
@@ -98,33 +98,33 @@
       </div>
 
       <div class="field">
-        <span class="label">From</span>
-        <input type="date" name="from_date" value="{{ from_date }}">
+        <label class="label" for="f-from_date">From</label>
+        <input id="f-from_date" type="date" name="from_date" value="{{ from_date }}">
       </div>
 
       <div class="field">
-        <span class="label">To</span>
-        <input type="date" name="to_date" value="{{ to_date }}">
+        <label class="label" for="f-to_date">To</label>
+        <input id="f-to_date" type="date" name="to_date" value="{{ to_date }}">
       </div>
 
       <div class="field">
-        <span class="label">Session</span>
-        <input type="text" name="session" value="{{ session }}" placeholder="session id" style="width:120px;">
+        <label class="label" for="f-session">Session</label>
+        <input id="f-session" type="text" name="session" value="{{ session }}" placeholder="session id" style="width:120px;">
       </div>
 
       <div class="field">
-        <span class="label">Salience ≥</span>
-        <input type="number" name="salience_min" min="0" max="100" step="10" value="{{ salience_min }}" style="width:60px;">
+        <label class="label" for="f-salience_min">Salience ≥</label>
+        <input id="f-salience_min" type="number" name="salience_min" min="0" max="10" step="1" value="{{ salience_min }}" style="width:60px;">
       </div>
 
       <div class="field">
-        <span class="label">Round ≥</span>
-        <input type="number" name="round_min" min="0" value="{{ round_min }}" style="width:50px;">
+        <label class="label" for="f-round_min">Round ≥</label>
+        <input id="f-round_min" type="number" name="round_min" min="0" value="{{ round_min }}" style="width:50px;">
       </div>
 
       <div class="field">
-        <span class="label">Per page</span>
-        <select name="limit">
+        <label class="label" for="f-limit">Per page</label>
+        <select id="f-limit" name="limit">
           {% for n in [20, 50, 100, 200] %}
           <option value="{{ n }}" {% if n == limit %}selected{% endif %}>{{ n }}</option>
           {% endfor %}

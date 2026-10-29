@@ -1,8 +1,6 @@
 {% extends "base.html" %}
 
-{% block head_extra %}
-<meta http-equiv="refresh" content="30">
-{% endblock %}
+{% block title %}Status{% endblock %}
 
 {% block content %}
 <style>
@@ -51,6 +49,9 @@
 
   .plist-yes { color: var(--teal); }
   .plist-no  { color: var(--muted); }
+  .is-bad    { color: var(--danger); }
+  .stat-tile.tile-bad { box-shadow: inset 0 2px 0 var(--danger); }
+  .stat-tile .tile-sub code { font-size: 0.6875rem; color: var(--muted); }
 
   .error-box {
     border: 1px solid var(--danger);
@@ -77,7 +78,7 @@
   }
 
   .refresh-note {
-    font-size: 0.75rem;
+    font-size: 0.8125rem;
     color: var(--label);
     margin-top: 12px;
   }
@@ -90,9 +91,11 @@
   </div>
 </div>
 
+<div id="status-live" hx-get="/status?project={{ current_project }}" hx-trigger="every 30s"
+     hx-select="#status-live" hx-swap="outerHTML">
 {% if status.dream_error %}
 <div class="error-box">
-  <span class="error-label">Dream error</span>
+  <span class="error-label">Last dream pass failed</span>
   {{ status.dream_error | e }}
   {% if status.dream_error_ts %}
   <div class="error-ts">at {{ status.dream_error_ts | int | datetimeformat }}</div>
@@ -112,41 +115,46 @@
       {% if status.dream_complete_ts %}
         {{ status.dream_complete_ts | int | datetimeformat }}
       {% else %}
-        —
+        never
       {% endif %}
     </span>
   </div>
 
   <div class="stat-tile">
-    <span class="tile-label">Edge queue depth</span>
+    <span class="tile-label">Pending link updates</span>
     <span class="tile-value">{{ status.edge_queue_depth }}</span>
-    <span class="tile-sub">undrained edge_bumps</span>
+    <span class="tile-sub">applied on the next dream pass</span>
+  </div>
+
+  <div class="stat-tile{% if not status.dream_plist_present %} tile-bad{% endif %}">
+    <span class="tile-label">Nightly dream job</span>
+    <span class="tile-value {% if status.dream_plist_present %}plist-yes{% else %}is-bad{% endif %}">
+      {% if status.dream_plist_present %}&#10003; scheduled{% else %}&#10007; not scheduled{% endif %}
+    </span>
+    <span class="tile-sub">{% if status.dream_plist_present %}ch.bissbert.biss-brain.dream{% else %}run <code>/biss-brain:install</code>{% endif %}</span>
   </div>
 
   <div class="stat-tile">
-    <span class="tile-label">DMN plist</span>
+    <span class="tile-label">Idle maintenance (optional)</span>
     <span class="tile-value {% if status.dmn_plist_present %}plist-yes{% else %}plist-no{% endif %}">
-      {% if status.dmn_plist_present %}&#10003;{% else %}&#10007;{% endif %}
+      {% if status.dmn_plist_present %}&#10003; on{% else %}off{% endif %}
     </span>
-    <span class="tile-sub">ch.bissbert.biss-brain.dmn</span>
+    <span class="tile-sub">{% if status.dmn_plist_present %}ch.bissbert.biss-brain.dmn{% else %}<code>/biss-brain:install --with-dmn</code> turns it on{% endif %}</span>
   </div>
 
-  <div class="stat-tile">
-    <span class="tile-label">Dream plist</span>
-    <span class="tile-value {% if status.dream_plist_present %}plist-yes{% else %}plist-no{% endif %}">
-      {% if status.dream_plist_present %}&#10003;{% else %}&#10007;{% endif %}
-    </span>
-    <span class="tile-sub">ch.bissbert.biss-brain.dream</span>
-  </div>
-
-  <div class="stat-tile">
-    <span class="tile-label">Claude CLI failures</span>
-    <span class="tile-value {% if status.cli_failures_24h and status.cli_failures_24h > 0 %}plist-no{% else %}plist-yes{% endif %}">
-      {{ status.cli_failures_24h or 0 }}
-    </span>
-    <span class="tile-sub">last 24h (distill + judge)</span>
+  {% set _fails = status.cli_failures_24h or 0 %}
+  <div class="stat-tile{% if _fails > 0 %} tile-bad{% endif %}">
+    <span class="tile-label">Claude CLI failures, 24 h</span>
+    <span class="tile-value {% if _fails > 0 %}is-bad{% else %}plist-yes{% endif %}">{{ _fails }}</span>
+    {% if _fails > 0 and status.cli_failure_last %}
+    <span class="tile-sub">Latest: {{ status.cli_failure_last }}{% if status.cli_failure_last_ts %}, {{ status.cli_failure_last_ts | int | datetimeformat }}{% endif %}</span>
+    <span class="tile-sub">Reasons in <code>{{ status.log_path }}</code></span>
+    {% else %}
+    <span class="tile-sub">distilling and judging calls</span>
+    {% endif %}
   </div>
 </div>
+</div>
 
-<p class="refresh-note">Status auto-refreshes every 30 s</p>
+<p class="refresh-note">Updates every 30 seconds.</p>
 {% endblock %}

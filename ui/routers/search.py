@@ -6,6 +6,7 @@ GET  /search              – full page or HTMX fragment
 POST /api/pin             – toggle pinned=1 for a chunk
 POST /api/unpin           – toggle pinned=0 for a chunk
 POST /api/forget          – soft-delete: set superseded_by to a tombstone uuid
+POST /api/unforget        – undo a forget (clears a tombstone, never a replacement)
 GET  /api/neighbours      – semantic neighbours for a chunk (B1, F-011)
 POST /api/compose         – compose selected chunk ids into markdown (B1, F-015)
 
@@ -53,6 +54,7 @@ from ui.data import (  # noqa: E402
     fetch_chunk_v05,
     fetch_chunks_meta,
     fetch_kinds_present,
+    fetch_lineage,
     fetch_neighbours,
     hybrid_search,
     open_lance,
@@ -290,7 +292,7 @@ async def search(
     to_date: str = Query("", description="End date YYYY-MM-DD"),
     session: str = Query("", description="Filter by session id"),
     pinned_only: int = Query(0, description="Show pinned chunks only (0|1)"),
-    salience_min: int = Query(0, ge=0, le=100, description="Minimum salience score"),
+    salience_min: int = Query(0, ge=0, le=10, description="Minimum salience score, 1-10"),
     round_min: int = Query(0, ge=0, description="Minimum consolidation round"),
     limit: int = Query(50, ge=1, le=200, description="Results per page"),
     offset: int = Query(0, ge=0, description="Pagination offset"),
@@ -341,6 +343,7 @@ async def search(
         "result_count": 0,
         "total_count": 0,
         "has_next": False,
+        "total_known": True,
         "kinds_present": kinds_present,
         "qs_prev": "",
         "qs_next": "",
@@ -426,9 +429,13 @@ async def search(
                 }
                 _enrich_with_v05(chunk, v05_map)
                 enriched.append(chunk)
+            _attach_lineage(project, enriched)
             ctx["results"] = enriched
             ctx["result_count"] = len(enriched)
             ctx["has_next"] = has_next
+        # The SQLite count covers the filters, not the text hits; ranked
+        # search has no cheap total, so pages say "next" without "of N".
+        ctx["total_known"] = False
 
     elif has_any_filter:
         # No text query but filters are active — use SQLite fetch_chunks_meta
@@ -439,6 +446,7 @@ async def search(
                 conn4,
                 where_sql=count_sql,
                 limit=limit + 1,
+                offset=offset,
             )
             has_next = len(meta_rows) > limit
             visible_meta = meta_rows[:limit]
@@ -469,6 +477,7 @@ async def search(
             }
             _enrich_with_v05(chunk, v05_map)
             enriched2.append(chunk)
+        _attach_lineage(project, enriched2)
         ctx["results"] = enriched2
         ctx["result_count"] = len(enriched2)
         ctx["has_next"] = has_next
@@ -528,48 +537,97 @@ async def _set_pin(request: Request, project: str, chunk_id: str, pinned: int) -
             (pinned, chunk_id, project),
         )
         conn.commit()
-        row = conn.execute(
+    finally:
+        conn.close()
+    return _card_response(request, project, chunk_id)
+
+
+def load_cards(project: str, ids: list[str]) -> list[dict]:
+    """Card dicts for ids, in their order; ids not in the project are skipped."""
+    if not ids:
+        return []
+    conn = open_meta_ro(project)
+    try:
+        marks = ",".join("?" * len(ids))
+        rows = {r[0]: r for r in conn.execute(
             "SELECT id, kind, ts, session_id, superseded_by, pinned, decay_score, retrieval_count "
-            "FROM chunks WHERE id = ? AND project = ?",
-            (chunk_id, project),
-        ).fetchone()
+            f"FROM chunks WHERE project = ? AND id IN ({marks})",
+            (project, *ids),
+        ).fetchall()}
+        v05_map = fetch_chunk_v05(conn, list(rows))
+        lineage = fetch_lineage(conn, list(rows))
     finally:
         conn.close()
 
-    if row is None:
+    texts = fetch_chunk_texts(open_lance(project), list(rows))
+    cards = []
+    for cid in ids:
+        row = rows.get(cid)
+        if row is None:
+            continue
+        text = texts.get(cid, "")
+        chunk = {
+            "id": row[0],
+            "kind": row[1],
+            "ts": row[2],
+            "session_id": row[3],
+            "text": text,
+            "text_html": html.escape(text[:400]),
+            "pinned": row[5],
+            "decay_score": row[6],
+            "retrieval_count": row[7],
+            "score": None,
+            "is_superseded": bool(row[4]),
+        }
+        _enrich_with_v05(chunk, v05_map)
+        chunk.update(lineage.get(cid, {}))
+        cards.append(chunk)
+    return cards
+
+
+def _card_response(request: Request, project: str, chunk_id: str, **extra: object) -> HTMLResponse:
+    """Re-read one chunk and render its card, after a pin, forget or restore."""
+    cards = load_cards(project, [chunk_id])
+    if not cards:
         raise HTTPException(status_code=404, detail=f"Chunk not found: {chunk_id}")
-
-    table = open_lance(project)
-    texts = fetch_chunk_texts(table, [chunk_id])
-
-    conn2 = open_meta_ro(project)
-    try:
-        v05_map = fetch_chunk_v05(conn2, [chunk_id])
-    finally:
-        conn2.close()
-
-    text = texts.get(row[0], "")
-    chunk = {
-        "id": row[0],
-        "kind": row[1],
-        "ts": row[2],
-        "session_id": row[3],
-        "text": text,
-        "text_html": html.escape(text[:400]),
-        "pinned": row[5],
-        "decay_score": row[6],
-        "retrieval_count": row[7],
-        "score": None,
-        "is_superseded": bool(row[4]),
-    }
-    _enrich_with_v05(chunk, v05_map)
     return templates.TemplateResponse(
-        request, "_chunk_card.html", {"project": project, "chunk": chunk}
+        request, "_chunk_card.html", {"project": project, "chunk": cards[0], **extra}
     )
 
 
+def _attach_lineage(project: str, chunks: list[dict]) -> None:
+    """Add replaced_by / replaces / forgotten to a page of cards in one pass."""
+    if not chunks:
+        return
+    conn = open_meta_ro(project)
+    try:
+        lineage = fetch_lineage(conn, [c["id"] for c in chunks])
+    finally:
+        conn.close()
+    for c in chunks:
+        c.update(lineage.get(c["id"], {}))
+
+
+def _mirror_superseded(project: str, chunk_id: str, value: str) -> None:
+    """Copy superseded_by into LanceDB so vector-side filters agree.
+
+    Best effort: SQLite is the source of truth.
+    """
+    try:
+        import lancedb  # noqa: PLC0415
+        _, lance_path = project_paths(project)
+        if lance_path.exists():
+            db = lancedb.connect(str(lance_path))
+            tables = db.list_tables()
+            tnames = tables.tables if hasattr(tables, "tables") else list(tables)
+            if "chunks" in tnames:
+                db.open_table("chunks").update(where=F.eq("id", chunk_id), values={"superseded_by": value})
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
-# POST /api/forget
+# POST /api/forget, /api/unforget
 # ---------------------------------------------------------------------------
 
 @router.post("/api/forget")
@@ -584,63 +642,41 @@ async def api_forget(
 
     conn = _open_meta_rw(sqlite_path)
     try:
-        conn.execute(
-            "UPDATE chunks SET superseded_by = ? WHERE id = ? AND project = ?",
+        cur = conn.execute(
+            "UPDATE chunks SET superseded_by = ? WHERE id = ? AND project = ? AND superseded_by = ''",
             (tomb, id, project),
         )
         conn.commit()
-        row = conn.execute(
-            "SELECT id, kind, ts, session_id, superseded_by, pinned, decay_score, retrieval_count "
-            "FROM chunks WHERE id = ? AND project = ?",
-            (id, project),
-        ).fetchone()
     finally:
         conn.close()
+    if cur.rowcount:
+        _mirror_superseded(project, id, tomb)
+    return _card_response(request, project, id, just_forgotten=bool(cur.rowcount))
 
-    if row is None:
-        raise HTTPException(status_code=404, detail=f"Chunk not found: {id}")
 
-    # Mirror into LanceDB
+@router.post("/api/unforget")
+async def api_unforget(
+    request: Request,
+    project: str = Query(...),
+    id: str = Query(...),
+) -> HTMLResponse:
+    """Undo a forget. Only a tombstone is cleared: a chunk replaced by a newer
+    one stays replaced, since that link is the contradiction record."""
+    validate_project(project)
+    sqlite_path, _ = project_paths(project)
+    conn = _open_meta_rw(sqlite_path)
     try:
-        import lancedb  # noqa: PLC0415
-        _, lance_path = project_paths(project)
-        if lance_path.exists():
-            db = lancedb.connect(str(lance_path))
-            tables = db.list_tables()
-            tnames = tables.tables if hasattr(tables, "tables") else list(tables)
-            if "chunks" in tnames:
-                tbl = db.open_table("chunks")
-                tbl.update(where=F.eq("id", id), values={"superseded_by": tomb})
-    except Exception:
-        pass  # best-effort mirror; SQLite is source of truth
-
-    table = open_lance(project)
-    texts = fetch_chunk_texts(table, [id])
-
-    conn3 = open_meta_ro(project)
-    try:
-        v05_map = fetch_chunk_v05(conn3, [id])
+        cur = conn.execute(
+            "UPDATE chunks SET superseded_by = '' WHERE id = ? AND project = ? AND superseded_by != '' "
+            "AND superseded_by NOT IN (SELECT id FROM chunks)",
+            (id, project),
+        )
+        conn.commit()
     finally:
-        conn3.close()
-
-    text = texts.get(row[0], "")
-    chunk = {
-        "id": row[0],
-        "kind": row[1],
-        "ts": row[2],
-        "session_id": row[3],
-        "text": text,
-        "text_html": html.escape(text[:400]),
-        "pinned": row[5],
-        "decay_score": row[6],
-        "retrieval_count": row[7],
-        "score": None,
-        "is_superseded": bool(row[4]),
-    }
-    _enrich_with_v05(chunk, v05_map)
-    return templates.TemplateResponse(
-        request, "_chunk_card.html", {"project": project, "chunk": chunk}
-    )
+        conn.close()
+    if cur.rowcount:
+        _mirror_superseded(project, id, "")
+    return _card_response(request, project, id)
 
 
 # ---------------------------------------------------------------------------

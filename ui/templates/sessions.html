@@ -1,6 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
-<div style="display:grid;grid-template-columns:200px 1fr;gap:48px;align-items:start;">
+<style>
+  .sessions-grid { display:grid; grid-template-columns:200px 1fr; gap:48px; align-items:start; }
+  @media (max-width: 1000px) { .sessions-grid { grid-template-columns:1fr; gap:24px; } }
+</style>
+<div class="sessions-grid">
 
   <aside>
     <div class="label" style="margin-bottom:12px;">Sessions</div>

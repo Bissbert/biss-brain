@@ -133,7 +133,7 @@ def _search(tmp_path: Path, project_hash: str, params: str) -> httpx.Response:
     _insert(brain_root / project_hash, "chunk-note-1", kind="note", ts=_NOW - _DAY)
     _insert(brain_root / project_hash, "chunk-decision-1", kind="decision", ts=_NOW)
     _insert(brain_root / project_hash, "chunk-pinned-1", kind="note", ts=_NOW, pinned=1)
-    _insert(brain_root / project_hash, "chunk-salience-1", kind="lesson", ts=_NOW, salience=80)
+    _insert(brain_root / project_hash, "chunk-salience-1", kind="lesson", ts=_NOW, salience=8)
     _insert(brain_root / project_hash, "chunk-round-1", kind="lesson", ts=_NOW, consolidation_round=2)
     _insert(brain_root / project_hash, "chunk-session-1", kind="note", ts=_NOW, session_id="abc123def456")
     _insert(brain_root / project_hash, "chunk-super-1", kind="note", ts=_NOW, superseded_by="tombstone")
@@ -269,10 +269,10 @@ class TestBuildWhere:
     def test_salience_min(self) -> None:
         result = self._bw(
             include_superseded=True, kind="", from_ts=None, to_ts=None,
-            session=None, pinned_only=False, salience_min=50, round_min=0,
+            session=None, pinned_only=False, salience_min=5, round_min=0,
         )
         assert result is not None
-        assert "salience >= 50" in result
+        assert "salience >= 5" in result
 
     def test_round_min(self) -> None:
         result = self._bw(
@@ -383,7 +383,13 @@ class TestPaginationQs:
         resp = _search(tmp_path, "aabb11223361", "limit=5&offset=5")
         body = resp.text
         # prev link should be present when offset > 0
-        assert "← prev" in body or "qs_prev" in body
+        assert 'rel="prev"' in body
+
+    def test_second_page_shows_the_next_chunks(self, tmp_path: Path) -> None:
+        ids = lambda body: set(re.findall(r'data-id="(chunk-[a-z0-9-]+)"', body))  # noqa: E731
+        first = ids(_search(tmp_path / "a", "aabb11223363", "limit=3&offset=0").text)
+        second = ids(_search(tmp_path / "b", "aabb11223363", "limit=3&offset=3").text)
+        assert len(first) == 3 and second and not first & second
 
     def test_result_meta_shows_count(self, tmp_path: Path) -> None:
         resp = _search(tmp_path, "aabb11223362", "")

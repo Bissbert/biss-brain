@@ -90,3 +90,32 @@ def test_fetch_brain_status_includes_cli_failures(tmp_path: Path, monkeypatch) -
     from ui.data import fetch_brain_status
     status = fetch_brain_status(project)
     assert status["cli_failures_24h"] == 2
+
+
+def test_status_page_names_the_latest_failure_in_coral(tmp_path: Path, monkeypatch) -> None:
+    """v0.9: a failure count reads as a problem, says what failed and where the
+    reasons are; the optional idle job, when absent, is not shown as broken."""
+    monkeypatch.setenv("BISS_BRAIN_ROOT", str(tmp_path))
+    for mod in ("common", "ui.data", "ui.server", "ui.routers.status"):
+        sys.modules.pop(mod, None)
+
+    now = int(time.time())
+    (tmp_path / "cli_failures.jsonl").write_text(
+        json.dumps({"ts": now - 60, "kind": "claude_cli_missing"}) + "\n"
+        + "not json\n"
+        + json.dumps({"ts": now - 30, "kind": "claude_cli_timeout"}) + "\n"
+    )
+    (tmp_path / "abc123def456").mkdir()
+
+    from ui.data import fetch_brain_status
+    from ui.server import templates
+
+    status = fetch_brain_status("abc123def456")
+    assert status["cli_failure_last"] == "Claude CLI timed out"
+    status.update(dmn_plist_present=False, dream_plist_present=True)
+    html = templates.get_template("status.html").render(
+        status=status, current_project="abc123def456", request=None, projects=[])
+    assert 'is-bad">2<' in html
+    assert "Latest: Claude CLI timed out" in html and "flush.log" in html
+    assert "&#10007;" not in html  # an optional job that is off is not a failure
+    assert 'http-equiv="refresh"' not in html and 'hx-trigger="every 30s"' in html

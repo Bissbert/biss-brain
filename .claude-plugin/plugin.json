@@ -1,7 +1,7 @@
 {
   "name": "biss-brain",
   "description": "Continuously-growing local RAG brain for Claude Code. Auto-captures findings from sessions, sub-agents, and pre-compaction events; nightly dream pass consolidates raw chunks into session arcs and refreshes A-MEM backlinks. Fully local stack (LanceDB + Ollama); distillation via headless Claude Code.",
-  "version": "0.8.1",
+  "version": "0.9.0",
   "homepage": "https://github.com/Bissbert/biss-brain",
   "repository": "https://github.com/Bissbert/biss-brain",
   "license": "MIT",

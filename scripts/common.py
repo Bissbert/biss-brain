@@ -8,6 +8,7 @@ import sqlite3
 import time
 import tomllib
 from dataclasses import dataclass, field
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -882,23 +883,53 @@ def open_or_create_chunks(lance_path: str | os.PathLike, dim: int) -> Any:
     return tbl
 
 
+# Superseded table versions older than this are pruned by refresh_fts and
+# compact_store. Every write makes new versions, each with its own copy of the
+# FTS index, and LanceDB's default of seven days kept over a thousand of them
+# (gigabytes for a few hundred rows; a busy project writes ~250 an hour).
+# Hooks and the MCP server open a fresh table per call and the UI follows the
+# latest within seconds, so ten minutes covers any reader mid-query.
+VERSION_RETENTION = timedelta(minutes=10)
+
+
 def refresh_fts(tbl: Any) -> bool:
     """Make sure the FTS index exists and covers every row.
 
     A LanceDB FTS index only covers the rows present when it was built or last
     optimized; later rows are flat-scanned, and some queries over unindexed
     rows crash the hybrid search. Call after every write batch (cheap: ~10 ms
-    for small tables). Returns False on failure (logged, never raised).
+    for small tables). Also prunes versions older than VERSION_RETENTION.
+    Returns False on failure (logged, never raised).
     """
     import logging  # noqa: PLC0415
 
     try:
         if not any(i.index_type == "FTS" and "text" in i.columns for i in tbl.list_indices()):
             tbl.create_fts_index("text", replace=True)
-        tbl.optimize()
+        tbl.optimize(cleanup_older_than=VERSION_RETENTION)
         return True
     except Exception as e:  # noqa: BLE001
         logging.getLogger("biss-brain").warning("FTS refresh failed: %s", e)
+        return False
+
+
+def compact_store(tbl: Any) -> bool:
+    """Rebuild the FTS index in one piece and prune old versions.
+
+    refresh_fts appends each write's rows to the index as a new partition, so
+    the index grows a few KB per write whatever the row count. The nightly
+    dream calls this per project to fold the partitions back into one, which
+    also shrinks a project that has had no write since an update. Returns
+    False on failure (logged, never raised).
+    """
+    import logging  # noqa: PLC0415
+
+    try:
+        tbl.create_fts_index("text", replace=True)
+        tbl.optimize(cleanup_older_than=VERSION_RETENTION)
+        return True
+    except Exception as e:  # noqa: BLE001
+        logging.getLogger("biss-brain").warning("store compaction failed: %s", e)
         return False
 
 

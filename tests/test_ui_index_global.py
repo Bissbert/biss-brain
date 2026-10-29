@@ -82,7 +82,6 @@ def _patch_modules(brain_root: Path) -> None:
             "common", "ui.data", "ui.server",
             "ui.routers.status", "ui.routers.search",
             "ui.routers.sessions", "ui.routers.timeline",
-            "ui.routers.scatter", "ui.routers.graph",
         ):
             del sys.modules[mod_name]
 
@@ -124,10 +123,10 @@ def test_global_empty_state_copy(tmp_path: Path) -> None:
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             resp = await client.get("/")
             assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.text[:400]}"
-            assert "cross-project pool" in resp.text, (
+            assert "cross-project lessons" in resp.text, (
                 "Index page must show 'cross-project pool' label for _global"
             )
-            assert "No global lessons yet" in resp.text, (
+            assert "No cross-project lessons yet" in resp.text, (
                 "Empty _global must show empty-state copy"
             )
             assert "cross_project.enabled" in resp.text, (
@@ -149,13 +148,13 @@ def test_global_with_chunks(tmp_path: Path) -> None:
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
             resp = await client.get("/")
             assert resp.status_code == 200
-            assert "cross-project pool" in resp.text
+            assert "cross-project lessons" in resp.text
             # Should NOT show the empty-state copy
-            assert "No global lessons yet" not in resp.text, (
+            assert "No cross-project lessons yet" not in resp.text, (
                 "Non-empty _global must not show empty-state copy"
             )
             # Should show the chunk count (4 lessons)
-            assert "4 lesson" in resp.text, (
+            assert "4 cross-project lesson" in resp.text, (
                 f"Expected '4 lesson' count in page; got excerpt: {resp.text[resp.text.find('global'):resp.text.find('global')+300]}"
             )
 

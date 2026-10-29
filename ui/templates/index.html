@@ -1,6 +1,49 @@
 {% extends "base.html" %}
+{% block title %}Overview{% endblock %}
+{% block head_extra %}
+<style>
+  .overview { display: grid; grid-template-columns: 200px 1fr; gap: 48px; align-items: start; }
+  .overview-stats { font-family: var(--font-mono); font-size: 0.8125rem; line-height: 1.7; font-feature-settings: 'tnum'; }
+  .overview-stats .global { margin-top: 6px; color: var(--teal); }
+  .overview-store { display: block; font-size: 0.75rem; color: var(--muted); word-break: break-all; line-height: 1.6; }
+
+  .next { margin-bottom: 48px; }
+  .next-lede { color: var(--muted); max-width: 68ch; margin: 4px 0 16px; line-height: 1.55; }
+  .next-lede code { color: var(--text); }
+  .next-list { list-style: none; margin: 0 0 16px; padding: 0; border-top: 1px solid var(--rule); }
+  .next-list li { padding: 10px 0; border-bottom: 1px solid var(--rule); }
+  .next-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; font-size: 0.75rem; color: var(--label); }
+  .next-text { margin: 4px 0 0; max-width: 80ch; line-height: 1.55; overflow-wrap: anywhere; }
+  .next-note { color: var(--muted); font-size: 0.8125rem; margin: 0 0 12px; }
+  .next-raw summary { cursor: pointer; color: var(--muted); font-size: 0.8125rem; padding: 6px 0; }
+  .next-raw pre {
+    max-height: 420px; overflow: auto; padding: 12px 14px; margin: 6px 0 0;
+    background: var(--surface); border: 1px solid var(--rule);
+    font-size: 0.75rem; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere;
+  }
+
+  .ledger { width: 100%; border-collapse: collapse; }
+  .ledger th { text-align: left; padding: 6px 16px 8px 0; font-weight: 500; border-bottom: 1px solid var(--rule); }
+  .ledger td { padding: 6px 16px 6px 0; border-bottom: 1px solid var(--rule); height: 36px; }
+  .ledger .num { text-align: right; font-family: var(--font-mono); font-feature-settings: 'tnum'; }
+  .ledger .when { color: var(--muted); font-size: 0.75rem; }
+  .ledger .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 520px; }
+  .ledger tr.is-active td:first-child { box-shadow: inset 2px 0 0 var(--accent); padding-left: 10px; }
+  .ledger tr.is-active code { color: var(--accent-ink); }
+  .ledger tr.is-global code, .ledger tr.is-global .path { color: var(--teal); }
+  .ledger .open { font-size: 0.75rem; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; }
+  .ledger .unlabelled { color: var(--label); font-style: italic; }
+  .ledger details summary { cursor: pointer; color: var(--muted); font-size: 0.75rem; padding: 6px 0; }
+  .ledger form { display: flex; gap: 16px; padding: 6px 0 14px; align-items: flex-end; }
+  .ledger form input[type=text] { flex: 1; font-size: 0.875rem; }
+
+  @media (max-width: 1000px) {
+    .overview { grid-template-columns: 1fr; gap: 24px; }
+    .ledger .when, .ledger th.when { display: none; }
+  }
+</style>
+{% endblock %}
 {% block content %}
-{# Separate _global project from regular projects using namespace for loop-scope mutation #}
 {% set global_hash = "5da0e6b1ad8a" %}
 {% set ns = namespace(global_project=None) %}
 {% set regular_projects = [] %}
@@ -13,107 +56,128 @@
 {% endfor %}
 {% set global_project = ns.global_project %}
 
-<div style="display:grid;grid-template-columns:200px 1fr;gap:48px;align-items:start;">
+<div class="overview">
 
-  {# left marginalia: small-caps counts, lab-notebook column header #}
   <aside>
     <div class="label" style="margin-bottom:12px;">Brain</div>
-    <div style="font-family:var(--font-mono);font-size:0.8125rem;color:var(--text);font-feature-settings:'tnum';line-height:1.7;">
+    <div class="overview-stats">
       <div>{{ regular_projects | length }} project{{ 's' if regular_projects | length != 1 else '' }}</div>
       {% if projects %}
       {% set total_chunks = regular_projects | sum(attribute='chunk_count') %}
-      <div>{{ total_chunks }} chunk{{ 's' if total_chunks != 1 else '' }}</div>
+      <div>{{ total_chunks }} memor{{ 'ies' if total_chunks != 1 else 'y' }}</div>
       {% endif %}
       {% if global_project %}
-      <div style="margin-top:6px;color:var(--teal);">{{ global_project.chunk_count }} global lesson{{ 's' if global_project.chunk_count != 1 else '' }}</div>
+      <div class="global">{{ global_project.chunk_count }} cross-project lesson{{ 's' if global_project.chunk_count != 1 else '' }}</div>
       {% endif %}
     </div>
     <div class="label" style="margin-top:24px;margin-bottom:6px;">Storage</div>
-    <code style="display:block;font-size:0.75rem;color:var(--muted);word-break:break-all;line-height:1.6;">~/.claude/brain</code>
+    <code class="overview-store">~/.claude/brain</code>
   </aside>
 
-  {# right column: page heading + tabular project ledger #}
   <section>
-    <h1>Inspector</h1>
-
-    {# _global cross-project pool pinned at top #}
-    {% if global_project %}
-    <div style="margin-bottom:24px;border-left:3px solid var(--teal);padding-left:14px;">
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:6px;">
-        <span style="font-size:1rem;color:var(--teal);">&#127760;</span>
-        <span style="font-family:var(--font-display);font-size:0.9375rem;font-weight:600;color:var(--teal);">cross-project pool</span>
-        <code style="font-size:0.75rem;color:var(--muted);">{{ global_project.hash }}</code>
-        <span style="margin-left:auto;">
-          <a href="/search?project={{ global_project.hash }}"
-             style="font-size:0.6875rem;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:var(--teal);">
-            open ↗
-          </a>
-        </span>
-      </div>
-      {% if global_project.chunk_count == 0 %}
-      <div style="font-size:0.8125rem;color:var(--muted);line-height:1.55;">
-        No global lessons yet — flip <code>cross_project.enabled = true</code>
-        and capture a <code>lesson</code> chunk in any project.
-      </div>
+    {% if preview %}
+    <div class="next" aria-labelledby="next-h">
+      <h1 id="next-h">Next session</h1>
+      {% if preview.status == "global" %}
+      <p class="next-lede">The cross-project pool starts no session of its own. Its lessons reach a project
+        only when a prompt there matches one.</p>
+      {% elif preview.status == "out_of_scope" %}
+      <p class="next-lede"><code>{{ preview.cwd }}</code> is outside the configured scope, so sessions there
+        start with nothing from the brain.</p>
+      {% elif preview.status == "store_mismatch" %}
+      <p class="next-lede">The store was built with a different embedding model than the config names, so the
+        hook injects nothing until they match. <code>/biss-brain:doctor</code> says which differs.</p>
+      {% elif preview.status == "unreadable" %}
+      <p class="next-lede">This store predates the current schema. The next hook run in the project updates it;
+        reload this page after that.</p>
       {% else %}
-      <div style="font-family:var(--font-mono);font-size:0.8125rem;color:var(--text);font-feature-settings:'tnum';">
-        {{ global_project.chunk_count }} lesson{{ 's' if global_project.chunk_count != 1 else '' }}
-        {% if global_project.last_active_ts %}
-        · last active {{ global_project.last_active_ts | int | datetimeformat }}
-        {% endif %}
-      </div>
+      {% set _n = preview.memories | length %}
+      {% set _chars = preview.text | length %}
+      <p class="next-lede">
+        A new session in {% if preview.cwd %}<code>{{ preview.cwd }}</code>{% else %}this project{% endif %}
+        starts with
+        {% if preview.cwd %}{{ preview.core_shown }} core note{{ 's' if preview.core_shown != 1 else '' }} and {% endif %}
+        {{ _n }} recent memor{{ 'ies' if _n != 1 else 'y' }}{% if _chars %}:
+        {{ _chars }} characters, about {{ (_chars / 4) | round | int }} tokens{% endif %}.
+        Later prompts can add a matching memory each.
+      </p>
+      {% if not preview.cwd %}
+      <p class="next-note">Core memory is kept per repository path. Label this project below to include it here.</p>
+      {% elif preview.core_total > preview.core_shown %}
+      <p class="next-note">{{ preview.core_total - preview.core_shown }} more core notes are over the limit and left out.
+        <code>/biss-brain:core</code> reviews them.</p>
+      {% endif %}
+
+      {% if preview.memories %}
+      <ol class="next-list">
+        {% for m in preview.memories %}
+        <li>
+          <div class="next-head">
+            <span class="badge{% if m.kind in ('decision', 'lesson', 'arc', 'daily_summary') %} accent{% endif %}">{{ m.kind }}</span>
+            <time datetime="{{ m._valid_from or m.ts }}">{{ (m._valid_from or m.ts) | int | datetimeformat }}</time>
+            <span>from {{ m.source_label }}</span>
+            <a href="/search?project={{ current_project }}&amp;q={{ m.text[:60] | urlencode }}">find in search</a>
+          </div>
+          <p class="next-text">{{ m.text[:320] }}{% if m.text | length > 320 %}…{% endif %}</p>
+        </li>
+        {% endfor %}
+      </ol>
+      {% elif not preview.text %}
+      <p class="next-note">Nothing yet: the brain has no memories here that a session would start with.</p>
+      {% endif %}
+
+      {% if preview.text %}
+      <details class="next-raw">
+        <summary>Exact text the session-start hook injects</summary>
+        <pre>{{ preview.text }}</pre>
+      </details>
+      {% endif %}
       {% endif %}
     </div>
+    <h2 class="label">Projects</h2>
+    {% else %}
+    <h1>Overview</h1>
+    <p class="next-lede">Pick a project to see what its next session starts with.</p>
     {% endif %}
 
-    {% if regular_projects %}
-    <table style="width:100%;border-collapse:collapse;">
+    {% if regular_projects or global_project %}
+    <table class="ledger">
       <thead>
         <tr>
-          <th class="label" style="text-align:left;padding:6px 16px 8px 0;font-weight:500;border-bottom:1px solid var(--rule);">Hash</th>
-          <th class="label" style="text-align:left;padding:6px 16px 8px;font-weight:500;border-bottom:1px solid var(--rule);">Path</th>
-          <th class="label" style="text-align:right;padding:6px 16px 8px;font-weight:500;border-bottom:1px solid var(--rule);">Chunks</th>
-          <th class="label" style="text-align:right;padding:6px 16px 8px;font-weight:500;border-bottom:1px solid var(--rule);">Last active</th>
-          <th style="padding:6px 0 8px 16px;border-bottom:1px solid var(--rule);"></th>
+          <th class="label" scope="col">Project</th>
+          <th class="label" scope="col">Path</th>
+          <th class="label num" scope="col">Memories</th>
+          <th class="label num when" scope="col">Last active</th>
+          <th scope="col"><span class="visually-hidden">Open</span></th>
         </tr>
       </thead>
       <tbody>
+        {% if global_project %}
+        <tr class="is-global{% if global_project.hash == current_project %} is-active{% endif %}">
+          <td><code>{{ global_project.hash }}</code></td>
+          <td class="path">cross-project lessons</td>
+          <td class="num">{{ global_project.chunk_count }}</td>
+          <td class="num when">{% if global_project.last_active_ts %}{{ global_project.last_active_ts | int | datetimeformat }}{% else %}—{% endif %}</td>
+          <td class="num"><a class="open" href="/search?project={{ global_project.hash }}">Search</a></td>
+        </tr>
+        {% endif %}
         {% for p in regular_projects %}
-        {% set is_active = p.hash == current_project %}
-        <tr style="border-bottom:1px solid var(--rule);height:36px;{% if is_active %}box-shadow:inset 2px 0 0 var(--accent);{% endif %}">
-          <td style="padding:6px 16px 6px {% if is_active %}10px{% else %}0{% endif %};">
-            <code style="font-size:0.8125rem;{% if is_active %}color:var(--accent);{% endif %}">{{ p.hash }}</code>
-          </td>
-          <td style="padding:6px 16px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:520px;">
-            {% if p.path %}{{ p.path }}{% else %}<span style="color:var(--label);font-style:italic;">unlabelled</span>{% endif %}
-          </td>
-          <td style="padding:6px 16px;text-align:right;font-family:var(--font-mono);font-feature-settings:'tnum';color:var(--text);">
-            {{ p.chunk_count }}
-          </td>
-          <td style="padding:6px 16px;text-align:right;font-family:var(--font-mono);font-feature-settings:'tnum';color:var(--muted);font-size:0.75rem;">
-            {% if p.last_active_ts %}{{ p.last_active_ts | int | datetimeformat }}{% else %}—{% endif %}
-          </td>
-          <td style="padding:6px 0 6px 16px;text-align:right;">
-            <a href="/search?project={{ p.hash }}"
-               style="font-size:0.6875rem;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;color:var(--muted);">
-              open ↗
-            </a>
-          </td>
+        <tr{% if p.hash == current_project %} class="is-active" aria-current="true"{% endif %}>
+          <td><a href="/?project={{ p.hash }}"><code>{{ p.hash }}</code></a></td>
+          <td class="path">{% if p.path %}{{ p.path }}{% else %}<span class="unlabelled">unlabelled</span>{% endif %}</td>
+          <td class="num">{{ p.chunk_count }}</td>
+          <td class="num when">{% if p.last_active_ts %}{{ p.last_active_ts | int | datetimeformat }}{% else %}—{% endif %}</td>
+          <td class="num"><a class="open" href="/search?project={{ p.hash }}">Search</a></td>
         </tr>
         {% if not p.path %}
-        <tr style="border-bottom:1px solid var(--rule);">
-          <td colspan="5" style="padding:0 0 0 {% if is_active %}10px{% else %}0{% endif %};">
+        <tr>
+          <td colspan="5">
             <details>
-              <summary style="cursor:pointer;color:var(--muted);font-size:0.6875rem;font-weight:500;letter-spacing:0.12em;text-transform:uppercase;padding:6px 0;list-style:none;">
-                + label this project
-              </summary>
-              <form
-                hx-post="/api/label"
-                hx-swap="outerHTML"
-                hx-target="closest details"
-                style="display:flex;gap:16px;padding:6px 0 14px;align-items:flex-end;">
+              <summary>Label this project with its path</summary>
+              <form hx-post="/api/label" hx-swap="outerHTML" hx-target="closest details">
                 <input type="hidden" name="hash" value="{{ p.hash }}">
-                <input type="text" name="path" placeholder="/path/to/project" style="flex:1;font-size:0.875rem;">
+                <label class="visually-hidden" for="label-{{ p.hash }}">Path of project {{ p.hash }}</label>
+                <input type="text" id="label-{{ p.hash }}" name="path" placeholder="/path/to/project">
                 <button type="submit">Save</button>
               </form>
             </details>
@@ -123,12 +187,13 @@
         {% endfor %}
       </tbody>
     </table>
-    {% elif not global_project %}
-    <div style="border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:32px 0;color:var(--muted);">
-      No projects found in <code>~/.claude/brain</code>. Run
-      <code>/biss-brain:recall</code> or <code>/biss-brain:remember</code> in any
-      project to create one.
-    </div>
+    {% if global_project and global_project.chunk_count == 0 %}
+    <p class="next-note" style="margin-top:12px;">No cross-project lessons yet. Set <code>cross_project.enabled = true</code>
+      and a <code>lesson</code> in any project is shared here.</p>
+    {% endif %}
+    {% else %}
+    <p class="next-lede">No projects in <code>~/.claude/brain</code> yet. Start a Claude Code session in any
+      repository and the brain creates one.</p>
     {% endif %}
   </section>
 </div>

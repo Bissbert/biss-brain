@@ -1,26 +1,32 @@
-{% if result_count is defined %}
-<div class="result-meta">
-  Showing <em>{{ result_count }}</em> of <em>{{ total_count }}</em> matching
+{% if result_count is defined and (results or offset) %}
+<p class="result-meta" role="status">
+  {% if total_known | default(true) %}
+  Showing <em>{{ offset + 1 }}–{{ offset + result_count }}</em> of <em>{{ total_count }}</em>
+  {% else %}
+  Showing <em>{{ offset + 1 }}–{{ offset + result_count }}</em> best matches
+  {% endif %}
   {% if q %}for <em>"{{ q | e }}"</em>{% endif %}
-</div>
+</p>
 {% endif %}
 
 {% if results %}
-<div>
+<div class="cards">
   {% for chunk in results %}
     {% with chunk=chunk %}{% include "_chunk_card.html" %}{% endwith %}
   {% endfor %}
 </div>
-{% elif q or (total_count is defined and total_count == 0) %}
-<div style="border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:32px 0;color:var(--muted);text-align:center;">
-  {% if q %}No results found for <em>{{ q | e }}</em>.{% else %}No results match the current filters.{% endif %}
+{% elif q or (total_count is defined and total_count == 0) or offset %}
+<div class="empty">
+  {% if offset %}No more results.{% elif q %}No results for <em>{{ q | e }}</em>. Try fewer words or clear a filter.{% else %}Nothing matches these filters.{% endif %}
 </div>
 {% endif %}
 
-{% if total_count is defined and total_count > limit %}
-<nav class="pagination" style="display:flex;gap:24px;justify-content:center;padding:24px 0;">
-  {% if offset > 0 %}<a href="?{{ qs_prev }}">← prev</a>{% endif %}
-  <span class="muted">page {{ (offset // limit) + 1 }} of {{ ((total_count - 1) // limit) + 1 }}</span>
-  {% if has_next %}<a href="?{{ qs_next }}">next →</a>{% endif %}
+{% if offset or has_next %}
+<nav class="pagination" aria-label="Result pages">
+  {% if offset > 0 %}<a href="?{{ qs_prev }}" hx-get="/search?{{ qs_prev }}" hx-target="#results" hx-push-url="true" rel="prev">← Previous</a>{% else %}<span></span>{% endif %}
+  <span class="muted">
+    page {{ (offset // limit) + 1 }}{% if total_known | default(true) and total_count %} of {{ ((total_count - 1) // limit) + 1 }}{% endif %}
+  </span>
+  {% if has_next %}<a href="?{{ qs_next }}" hx-get="/search?{{ qs_next }}" hx-target="#results" hx-push-url="true" rel="next">Next →</a>{% else %}<span></span>{% endif %}
 </nav>
 {% endif %}

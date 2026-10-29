@@ -63,7 +63,7 @@ biss-brain/
   scope.cache                       # [scope] rules for _run.sh (written by scope.py)
   <project-hash>/                   # sha256(main checkout of the repo)[:12]; realpath outside a repo
     queue/                          # pending events drained by flush.py
-    lancedb/chunks.lance/           # vector + FTS index
+    lancedb/chunks.lance/           # vector + FTS index; versions older than 10 min pruned on each write, index rebuilt nightly
     meta.sqlite                     # chunk metadata, superseded, pinned, counts
 ```
 
@@ -80,6 +80,7 @@ biss-brain/
 | **1a Backlink refresh** | Re-runs A-MEM-style top-K linking on chunks the pass hasn't visited yet. Picks up neighbours that didn't exist at insert time (HippoRAG-style synonym edges). | None (vector search only) |
 | **1b Conflict sweep** | For each chunk added in the last `candidate_window_hours`, the existing `judge.py` runs against its top-similar neighbour. `CONTRADICTS` → marks the older chunk superseded. `EXTENDS` → appends to `related_ids`. | Up to 1 Haiku call per new chunk |
 | **1c Decay** | Recomputes `decay_score` for every chunk from age and pin (plus `decay_usage_boost` × retrievals, off by default). | None |
+| **1d Compact** | Rebuilds the full-text index in one piece and prunes table versions older than ten minutes. Rows do not change. | None |
 | **2a Session arcs** | Groups raw chunks by `session_id`, distills each session into a `kind='arc'` chunk at `consolidation_round=1`. Sets `parent_id` on the originals so the UI can collapse / expand. Skips sessions younger than `session_cooldown_hours`. | One Haiku call per qualifying session |
 | **2b Daily summary** | (opt-in) Rolls up arcs by calendar day into `kind='daily_summary'` at `consolidation_round=2`. | One Sonnet call per qualifying day |
 | **2c Core proposals** | Queues short, trusted, often-recalled decisions, lessons, schemas and pinned chunks as core-memory proposals. Never writes core. | None |
@@ -177,7 +178,7 @@ stays on only if it improves MRR, or costs nothing measurable. Numbers and metho
   - A per-session ledger means nothing is injected twice, and anything already in core is skipped.
   - The embed budget is 300 ms; past it, the BM25 gate decides. The hard deadline is 2.5 s.
   - Each run appends latency and outcome to `inject_metrics.jsonl`; doctor warns when p95 exceeds 800 ms.
-- Local web UI via `/biss-brain:ui` — search, session replay, timeline, UMAP scatter, backlink graph (see Web UI section above)
+- Local web UI via `/biss-brain:ui`: next-session preview, search, review queue, session replay, timeline and status (see the Web UI section of the README)
 
 ## Pitfalls and current limitations
 
@@ -259,7 +260,7 @@ Sketch of what an implementation would look like:
   3. For clusters with `≥ N` members, distill via `claude -p`: pass member texts (plus their arc parents from Stage 2) and ask for `{label, summary}` JSON. New prompt at `prompts/dream_cluster.md`.
   4. Match new clusters to the previous run's centroids by nearest-neighbour to keep `cluster_id` stable; emit a new id only when no centroid is within `0.3` cosine distance.
   5. Write the `clusters` row, set `chunks.cluster_id` for every member.
-- **UI.** Graph panel grows a "communities" overlay (colour edges/nodes by `cluster_id`). Scatter panel can colour by `cluster_id` instead of `kind`. Search panel grows a cluster filter chip. New `/biss-brain:clusters` command lists clusters by size with their labels.
+- **UI.** Search grows a cluster filter chip, and cards name their cluster. New `/biss-brain:clusters` command lists clusters by size with their labels.
 - **Retrieval.** At search time, after fetching top-K results, also fetch the cluster summary for each result's `cluster_id` and offer it as an optional context block — gives the model the wider story before it dives into specifics.
 - **Cost.** Rough estimate for a 2000-chunk project: ~30–60 clusters → ~30 Sonnet calls per weekly run. Acceptable for a Pro subscription.
 

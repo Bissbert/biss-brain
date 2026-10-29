@@ -24,6 +24,7 @@ import sqlite3
 import sys
 import time
 import uuid
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,7 @@ from common import (  # noqa: E402
     vector_search,
 )
 from retrieve import relevance  # noqa: E402
+from scrub import scrub  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # LanceDB connection cache – safe for concurrent read-only access.
@@ -132,6 +134,7 @@ def fetch_chunks_meta(
     where_sql: str = "1=1",
     params: tuple = (),
     limit: int = 200,
+    offset: int = 0,
 ) -> list[dict]:
     """Fetch chunk metadata rows from the open SQLite connection.
 
@@ -142,9 +145,9 @@ def fetch_chunks_meta(
     query = (
         f"SELECT {_META_COLUMNS} FROM chunks "
         f"WHERE {where_sql} "
-        f"ORDER BY ts DESC LIMIT ?"
+        f"ORDER BY ts DESC LIMIT ? OFFSET ?"
     )
-    rows = conn.execute(query, (*params, limit)).fetchall()
+    rows = conn.execute(query, (*params, limit, offset)).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -165,7 +168,9 @@ def open_lance(project_hash: str) -> Any | None:
     if not lance_path.exists():
         return None
 
-    db = lancedb.connect(str(lance_path))
+    # The cached table must follow writers: they prune versions older than ten
+    # minutes (common.VERSION_RETENTION), and a pinned old version would vanish.
+    db = lancedb.connect(str(lance_path), read_consistency_interval=timedelta(seconds=5))
     tables = db.list_tables()
     # list_tables() returns either a plain list or an object with .tables
     table_names: list[str] = tables.tables if hasattr(tables, "tables") else list(tables)
@@ -265,6 +270,36 @@ def fetch_kinds_present(conn: sqlite3.Connection, project_hash: str) -> list[str
     return kinds
 
 
+def fetch_lineage(conn: sqlite3.Connection, ids: list[str]) -> dict[str, dict]:
+    """What each chunk on a page replaced, and what replaced it.
+
+    Returns {id: {superseded_by, replaced_by, forgotten, replaces}}. A
+    superseded_by naming a chunk that exists is a replacement (a contradiction
+    resolved by a newer note); one naming no chunk is a forget tombstone.
+    """
+    if not ids:
+        return {}
+    ph = ", ".join("?" for _ in ids)
+    out: dict[str, dict] = {
+        cid: {"superseded_by": sup or "", "replaced_by": "", "forgotten": False, "replaces": []}
+        for cid, sup in conn.execute(f"SELECT id, superseded_by FROM chunks WHERE id IN ({ph})", ids)
+    }
+    sups = sorted({v["superseded_by"] for v in out.values() if v["superseded_by"]})
+    if sups:
+        ph2 = ", ".join("?" for _ in sups)
+        live = {r[0] for r in conn.execute(f"SELECT id FROM chunks WHERE id IN ({ph2})", sups)}
+        for v in out.values():
+            if v["superseded_by"] in live:
+                v["replaced_by"] = v["superseded_by"]
+            elif v["superseded_by"]:
+                v["forgotten"] = True
+    for sup, old in conn.execute(
+        f"SELECT superseded_by, id FROM chunks WHERE superseded_by IN ({ph}) ORDER BY ts DESC", ids
+    ):
+        out[sup]["replaces"].append(old)
+    return out
+
+
 def fetch_chunk_v05(conn: sqlite3.Connection, ids: list[str]) -> dict[str, dict]:
     """Bulk-read v0.5 columns for chunks.
 
@@ -330,6 +365,34 @@ def _count_cli_failures_24h() -> int:
     return count
 
 
+_CLI_FAILURE_TEXT = {
+    "claude_cli_missing": "Claude CLI not found",
+    "claude_cli_timeout": "Claude CLI timed out",
+    "claude_cli_error": "Claude CLI returned an error",
+}
+
+
+def _last_cli_failure() -> tuple[str, int]:
+    """The most recent claude CLI failure as (plain text, ts), or ("", 0).
+
+    Rows carry only a fixed kind and a timestamp; the reason itself is in
+    flush.log, so nothing from a transcript reaches the page.
+    """
+    log = BRAIN_ROOT / "cli_failures.jsonl"
+    try:
+        lines = log.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return "", 0
+    for line in reversed(lines):
+        try:
+            row = json.loads(line)
+            kind = str(row.get("kind", ""))
+            return _CLI_FAILURE_TEXT.get(kind, "Claude CLI call failed"), int(row.get("ts", 0))
+        except (json.JSONDecodeError, ValueError, TypeError, AttributeError):
+            continue
+    return "", 0
+
+
 def fetch_brain_status(project_hash: str) -> dict:
     """Read dream_state row + edge_bumps queue depth + DMN/dream daemon plist presence.
 
@@ -343,6 +406,9 @@ def fetch_brain_status(project_hash: str) -> dict:
       'dmn_plist_present': bool,    # ~/Library/LaunchAgents/ch.bissbert.biss-brain.dmn.plist
       'dream_plist_present': bool,
       'cli_failures_24h': int,      # tail of BRAIN_ROOT/cli_failures.jsonl in last 24h
+      'cli_failure_last': str,      # plain text of the newest failure, '' if none
+      'cli_failure_last_ts': int,
+      'log_path': str,              # where the daemon logs the reasons
     }
     Degrades gracefully (returns zeros/empties) if tables don't exist.
     Opens and closes its own SQLite connection.
@@ -356,7 +422,9 @@ def fetch_brain_status(project_hash: str) -> dict:
         "dmn_plist_present": False,
         "dream_plist_present": False,
         "cli_failures_24h": _count_cli_failures_24h(),
+        "log_path": str(BRAIN_ROOT / "flush.log").replace(str(Path.home()), "~", 1),
     }
+    result["cli_failure_last"], result["cli_failure_last_ts"] = _last_cli_failure()
 
     # Check plist presence via filesystem
     launch_agents = Path.home() / "Library" / "LaunchAgents"
@@ -388,7 +456,7 @@ def fetch_brain_status(project_hash: str) -> dict:
                 if row:
                     result["dream_stage"] = row["last_stage"] or "IDLE"
                     result["dream_complete_ts"] = row["last_complete_ts"] or 0
-                    result["dream_error"] = row["last_error"] or ""
+                    result["dream_error"] = scrub(row["last_error"] or "")  # exception text can quote a secret
                     result["dream_error_ts"] = row["last_error_ts"] or 0
             except sqlite3.OperationalError:
                 pass

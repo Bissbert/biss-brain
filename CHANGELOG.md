@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.9.0 — 2026-10-29
+
+The web UI is reworked around the decisions a memory store asks of you, and the store stops
+growing without bound.
+
+### Added
+
+- **Overview** previews what the next session in a project starts with: the core notes, the
+  recent memories and the exact text the session-start hook injects. It reads with the hook's own
+  code on a read-only connection, so looking changes nothing.
+- **Review** page: core-memory proposals to accept or reject, the faintest fading memories to pin
+  or forget, and facts replaced in the last 30 days beside what replaced them.
+- Cards say what they replaced or what replaced them. Forget can be undone from the card.
+- A `?` dialog with the keyboard shortcuts and a glossary (salience, decay, labile, round,
+  replaced, DMN). `g r` opens Review.
+- The status page shows model-call failures in coral with the latest cause, and marks the idle
+  maintenance job as optional.
+- The README explains which mechanisms of human memory the brain borrows and what each does here.
+
+### Changed
+
+- Cards are slimmer; the details fold away.
+- Every filter has a real label, focus is always visible, a skip link leads to the content, no text
+  is below 12 px, and the navigation wraps on narrow windows instead of overflowing.
+- The UI makes no external requests: htmx, d3, Plot and the fonts ship with the plugin.
+
+### Removed
+
+- The Scatter and Graph panels, and with them the `umap-learn` dependency. Neither led to a
+  decision; replacements now show inline on the cards.
+
+### Fixed
+
+- **Store size.** Every write left a new LanceDB version with its own copy of the full-text index,
+  LanceDB kept seven days of them, and the live index grew a partition per write: a project with
+  539 memories took 5 GB, and one with 302 took 1.6 GB, which compacts to 2.4 MB. Versions older
+  than ten minutes are now pruned on every write, and the nightly dream rebuilds each project's
+  index in one piece (stage 1d), so every store shrinks by the morning after updating, idle ones
+  included. Memories are not touched. Writes get faster too: an index refresh on that store took
+  15 s and takes 0.02 s once compacted. The first write after the update can take a while longer
+  than usual while the backlog is pruned.
+- Salience is scored from 1 to 10, but cards drew it as if out of 100 (almost every dot empty)
+  and the filter stepped in tens. Both use the real scale now.
+- Search pages past the first showed the first page again, and text search reported the filter
+  count as its total.
+
 ## 0.8.1 — 2026-10-29
 
 ### Fixed

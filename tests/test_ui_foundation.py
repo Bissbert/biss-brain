@@ -74,14 +74,12 @@ def test_server_starts() -> None:
 def test_router_modules() -> None:
     from fastapi import APIRouter
 
-    from ui.routers import search, sessions, timeline, scatter, graph
+    from ui.routers import search, sessions, timeline
 
     for name, module in [
         ("search", search),
         ("sessions", sessions),
         ("timeline", timeline),
-        ("scatter", scatter),
-        ("graph", graph),
     ]:
         assert hasattr(module, "router"), f"ui.routers.{name} has no 'router' attribute"
         assert isinstance(module.router, APIRouter), (

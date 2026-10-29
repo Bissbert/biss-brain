@@ -87,12 +87,12 @@ def _base_chunk(**overrides) -> dict:
 # ---------------------------------------------------------------------------
 
 def test_salience_dots_present() -> None:
-    chunk = _base_chunk(salience=60)
+    chunk = _base_chunk(salience=6)
     html = _render_card(chunk)
-    # Should render 10 dot spans; salience 60 => 6 filled, 4 empty
+    # Salience is 1-10: 6 fills six of the ten dots
     assert "sal" in html, "Salience label 'sal' should appear"
-    # The value 60 should appear as text
-    assert ">60<" in html or ">60 <" in html or "60</span>" in html or ">60</span>" in html
+    assert html.count('<i class="on">') == 6
+    assert ">6</span>" in html
 
 
 def test_salience_zero() -> None:
@@ -104,10 +104,10 @@ def test_salience_zero() -> None:
 
 
 def test_salience_max() -> None:
-    chunk = _base_chunk(salience=100)
+    chunk = _base_chunk(salience=10)
     html = _render_card(chunk)
     assert "sal" in html
-    assert ">100<" in html or "100</span>" in html
+    assert html.count('<i class="on">') == 10 and ">10</span>" in html
 
 
 # ---------------------------------------------------------------------------
