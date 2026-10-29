@@ -324,6 +324,27 @@ def pending_checks(root: Path) -> list[tuple[str, str]]:
     return out
 
 
+def daemon_checks(root: Path, plugin_root: Path, root_of: Callable[[int], Path | None] | None = None
+                  ) -> list[tuple[str, str]]:
+    """A flush daemon running from an older plugin copy than this one."""
+    from common import daemon_root, plugin_version  # noqa: PLC0415
+
+    try:
+        pid = int((root / "flush.pid").read_text().strip())
+        os.kill(pid, 0)
+    except (OSError, ValueError):
+        return []
+    theirs = (root_of or daemon_root)(pid)
+    if theirs is None or theirs == plugin_root:
+        return []
+    old, new = plugin_version(theirs), plugin_version(plugin_root)
+    if old is None or new is None or old >= new:
+        return []
+    return [(f"the flush daemon runs from {'.'.join(map(str, old))}, older than {'.'.join(map(str, new))}",
+             "A Claude Code session started before the update keeps starting it. Restart old sessions; "
+             "the next capture from an updated session replaces it.")]
+
+
 def scope_checks(cwd: str, cfg: dict) -> list[tuple[str, str]]:
     """Whether this directory is captured, and whether the configured scope paths exist."""
     import scope  # noqa: PLC0415
@@ -448,6 +469,7 @@ def main() -> int:
         ("launchd jobs", lambda: launchd_checks(plugin_root) if sys.platform == "darwin" else []),
         ("dream", lambda: dream_checks(BRAIN_ROOT)),
         ("pending work", lambda: pending_checks(BRAIN_ROOT)),
+        ("flush daemon", lambda: daemon_checks(BRAIN_ROOT, plugin_root)),
         ("scope", lambda: scope_checks(cwd, cfg)),
         ("core memory", lambda: core_checks(cwd, cfg)),
         ("prompt injection", lambda: inject_checks(cwd, cfg)),

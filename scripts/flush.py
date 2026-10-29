@@ -183,15 +183,22 @@ def _fetch_recent_embeddings(tbl: object, meta, proj: str, limit: int = 20) -> l
 
 
 # ── locking ─────────────────────────────────────────────────────────────
-def _acquire_pidlock() -> Path | None:
+def _acquire_pidlock(wait: float = 5.0) -> Path | None:
+    """Take flush.pid. Waits *wait* seconds, so a daemon that capture.py just
+    stopped (an older plugin copy) can let go."""
     BRAIN_ROOT.mkdir(parents=True, exist_ok=True)
     pid_file = BRAIN_ROOT / "flush.pid"
     fd = os.open(str(pid_file), os.O_RDWR | os.O_CREAT, 0o644)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
-        os.close(fd)
-        return None
+    end = time.monotonic() + wait
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            break
+        except BlockingIOError:
+            if time.monotonic() >= end:
+                os.close(fd)
+                return None
+            time.sleep(0.2)
     os.ftruncate(fd, 0)
     os.write(fd, f"{os.getpid()}".encode())
     return pid_file

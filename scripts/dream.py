@@ -1156,6 +1156,31 @@ def run_stage2(pdir: Path, cfg: dict, dry_run: bool) -> dict:
             "core_proposed": core_proposed}
 
 
+def _record_state(pdir: Path, stage: str, error: str | None = None) -> None:
+    """Note the pass in dream_state, which the UI's status page reads."""
+    conn = _open_meta_direct(pdir)
+    try:
+        if error is None:
+            conn.execute(
+                "INSERT INTO dream_state (project, last_stage, last_complete_ts) VALUES (?, ?, ?) "
+                "ON CONFLICT(project) DO UPDATE SET last_stage = excluded.last_stage, "
+                "last_complete_ts = excluded.last_complete_ts, last_error = '', last_error_ts = 0",
+                (pdir.name, stage, now_unix()),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO dream_state (project, last_stage, last_error, last_error_ts) VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(project) DO UPDATE SET last_stage = excluded.last_stage, "
+                "last_error = excluded.last_error, last_error_ts = excluded.last_error_ts",
+                (pdir.name, stage, error[:500], now_unix()),
+            )
+        conn.commit()
+    except sqlite3.Error:
+        log.warning("could not record dream_state for %s", pdir.name)
+    finally:
+        conn.close()
+
+
 def _kick_flush() -> None:
     """Start the flush daemon when segments or embeds wait for a retry.
 
@@ -1210,10 +1235,17 @@ def _run(args: argparse.Namespace, cfg: dict) -> int:
     for pdir in _project_dirs(args.project):
         proj = pdir.name
         s: dict[str, Any] = {}
-        if args.stage in ("1", "all"):
-            s["stage1"] = run_stage1(pdir, cfg, args.dry_run)
-        if args.stage in ("2", "all"):
-            s["stage2"] = run_stage2(pdir, cfg, args.dry_run)
+        try:
+            if args.stage in ("1", "all"):
+                s["stage1"] = run_stage1(pdir, cfg, args.dry_run)
+            if args.stage in ("2", "all"):
+                s["stage2"] = run_stage2(pdir, cfg, args.dry_run)
+        except Exception as e:
+            if not args.dry_run:
+                _record_state(pdir, f"STAGE{args.stage.upper()}", error=f"{type(e).__name__}: {e}")
+            raise
+        if not args.dry_run:
+            _record_state(pdir, "COMPLETE" if args.stage == "all" else f"STAGE{args.stage}")
         summary[proj] = s
 
     log.info("dream pass complete: %s", json.dumps(summary, default=str))

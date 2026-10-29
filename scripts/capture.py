@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
 import sys
 import uuid
@@ -25,8 +26,10 @@ from pathlib import Path
 from common import (
     BRAIN_ROOT,
     Event,
+    daemon_root,
     ensure_project_label,
     load_config,
+    plugin_version,
     project_dir,
     queue_dir,
 )
@@ -48,6 +51,23 @@ def _read_hook_input() -> dict:
         return {}
 
 
+def _replace_older(pid: int, plugin_root: Path) -> bool:
+    """Stop daemon *pid* when it runs from an older plugin copy than ours.
+
+    A Claude Code session keeps the plugin copy it started with, so after an
+    update its hooks keep starting the old flush.py, old bugs included. The
+    newer copy wins; the old session's hooks see a live daemon and leave it.
+    """
+    theirs = daemon_root(pid)
+    if theirs is None or theirs == plugin_root:
+        return False
+    old, new = plugin_version(theirs), plugin_version(plugin_root)
+    if old is None or new is None or old >= new:
+        return False
+    os.kill(pid, signal.SIGTERM)  # queued events stay on disk; the new daemon picks them up
+    return True
+
+
 def _ensure_daemon(plugin_root: Path) -> None:
     """Start flush.py daemon if not already running. Best-effort, never blocks."""
     pid_file = BRAIN_ROOT / "flush.pid"
@@ -55,7 +75,8 @@ def _ensure_daemon(plugin_root: Path) -> None:
         try:
             pid = int(pid_file.read_text().strip())
             os.kill(pid, 0)  # signal 0: probe liveness
-            return  # already running
+            if not _replace_older(pid, plugin_root):
+                return  # already running
         except (ValueError, ProcessLookupError, PermissionError):
             pid_file.unlink(missing_ok=True)
 

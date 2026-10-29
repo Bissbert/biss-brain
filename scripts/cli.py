@@ -67,6 +67,17 @@ def _workdir():
         return None
 
 
+def _reason(stdout: str | None) -> str:
+    """The error text of a failed JSON reply, else the start of stdout."""
+    try:
+        data = json.loads(stdout or "")
+        if isinstance(data, dict):
+            return str(data.get("result") or data.get("subtype") or "")[:300]
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return (stdout or "").strip()[:300]
+
+
 def run_claude(prompt: str, model: str = "haiku", timeout: int = 120) -> str | None:
     """Run `claude -p` headless and return the reply text, or None on any failure.
 
@@ -80,6 +91,8 @@ def run_claude(prompt: str, model: str = "haiku", timeout: int = 120) -> str | N
         return None
 
     resolved = MODEL_MAP.get(model, model)
+    # A NUL can come in with transcript text; argv cannot carry one.
+    prompt = prompt.replace("\0", "")
     cmd = [
         str(cli), "-p", prompt,
         "--setting-sources", "",
@@ -103,10 +116,16 @@ def run_claude(prompt: str, model: str = "haiku", timeout: int = 120) -> str | N
         _record_failure("claude_cli_missing")
         log.error("biss-brain: claude CLI unreachable")
         return None
+    except (OSError, ValueError) as e:
+        _record_failure("claude_cli_error")
+        log.warning("claude -p could not start: %s", e)
+        return None
 
     if proc.returncode != 0:
         _record_failure("claude_cli_error")
-        log.warning("claude -p exit=%s stderr=%s", proc.returncode, (proc.stderr or "")[:300])
+        # With --output-format json the reason is in stdout, not stderr.
+        log.warning("claude -p exit=%s stderr=%s stdout=%s", proc.returncode,
+                    (proc.stderr or "").strip()[:300], _reason(proc.stdout))
         return None
 
     try:
@@ -118,6 +137,6 @@ def run_claude(prompt: str, model: str = "haiku", timeout: int = 120) -> str | N
     if data.get("is_error"):
         # exit 0 but the CLI reports failure (not logged in, rate limited, ...)
         _record_failure("claude_cli_error")
-        log.warning("claude -p reported is_error (subtype=%s)", data.get("subtype"))
+        log.warning("claude -p reported is_error (subtype=%s): %s", data.get("subtype"), _reason(proc.stdout))
         return None
     return (data.get("result") or "").strip() or None

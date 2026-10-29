@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.8.1 — 2026-10-29
+
+### Fixed
+
+- Distill stopped working when a Claude Code session started before an update kept running an
+  older flush daemon. A capture from a newer plugin copy now stops a daemon started from an older
+  one and takes over; queued events stay on disk and drain. `/biss-brain:doctor` flags an
+  outdated daemon.
+- A NUL byte in a transcript window crashed the distill call (`embedded null byte`). It is
+  dropped from the prompt, and a call that cannot start counts as a CLI failure.
+- A failed `claude -p` call logs its reason. With JSON output the CLI reports errors on stdout,
+  so the log showed an empty `stderr=` before.
+- The UI's status page read keys the server never sent, so "Last complete", the error time and
+  both job tiles were always empty or ✗.
+- The nightly dream pass records each project's last completion or error in `dream_state`; only
+  the optional DMN job wrote it before.
+
 ## 0.8.0 — 2026-10-29
 
 Public release. The repo is now its own marketplace:

@@ -348,6 +348,30 @@ def repo_root(cwd: str | os.PathLike) -> Path:
     return _normalize_worktree(real)
 
 
+def plugin_version(root: str | os.PathLike) -> tuple[int, ...] | None:
+    """The version in a plugin copy's plugin.json as a tuple, or None."""
+    try:
+        v = json.loads((Path(root) / ".claude-plugin" / "plugin.json").read_text())["version"]
+        return tuple(int(p) for p in str(v).split("."))
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def daemon_root(pid: int) -> Path | None:
+    """The plugin copy a running flush daemon was started from, read from its command line."""
+    import subprocess  # noqa: PLC0415
+
+    try:
+        cmd = subprocess.run(["ps", "-o", "command=", "-p", str(pid)],
+                             capture_output=True, text=True, timeout=2).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for tok in cmd.split():
+        if tok.endswith("/scripts/flush.py"):
+            return Path(tok).parent.parent
+    return None
+
+
 def project_key(cwd: str | os.PathLike) -> str:
     """One store per repo: every worktree and subdirectory shares the main checkout's key."""
     return hashlib.sha256(str(repo_root(cwd)).encode()).hexdigest()[:12]

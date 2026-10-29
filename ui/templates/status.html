@@ -94,8 +94,8 @@
 <div class="error-box">
   <span class="error-label">Dream error</span>
   {{ status.dream_error | e }}
-  {% if status.last_error_ts %}
-  <div class="error-ts">at {{ status.last_error_ts | int | datetimeformat }}</div>
+  {% if status.dream_error_ts %}
+  <div class="error-ts">at {{ status.dream_error_ts | int | datetimeformat }}</div>
   {% endif %}
 </div>
 {% endif %}
@@ -109,8 +109,8 @@
   <div class="stat-tile">
     <span class="tile-label">Last complete</span>
     <span class="tile-value" style="font-size:0.875rem;">
-      {% if status.last_complete_ts %}
-        {{ status.last_complete_ts | int | datetimeformat }}
+      {% if status.dream_complete_ts %}
+        {{ status.dream_complete_ts | int | datetimeformat }}
       {% else %}
         —
       {% endif %}
@@ -125,16 +125,16 @@
 
   <div class="stat-tile">
     <span class="tile-label">DMN plist</span>
-    <span class="tile-value {% if status.dmn_plist_exists %}plist-yes{% else %}plist-no{% endif %}">
-      {% if status.dmn_plist_exists %}&#10003;{% else %}&#10007;{% endif %}
+    <span class="tile-value {% if status.dmn_plist_present %}plist-yes{% else %}plist-no{% endif %}">
+      {% if status.dmn_plist_present %}&#10003;{% else %}&#10007;{% endif %}
     </span>
     <span class="tile-sub">ch.bissbert.biss-brain.dmn</span>
   </div>
 
   <div class="stat-tile">
     <span class="tile-label">Dream plist</span>
-    <span class="tile-value {% if status.dream_plist_exists %}plist-yes{% else %}plist-no{% endif %}">
-      {% if status.dream_plist_exists %}&#10003;{% else %}&#10007;{% endif %}
+    <span class="tile-value {% if status.dream_plist_present %}plist-yes{% else %}plist-no{% endif %}">
+      {% if status.dream_plist_present %}&#10003;{% else %}&#10007;{% endif %}
     </span>
     <span class="tile-sub">ch.bissbert.biss-brain.dream</span>
   </div>
