@@ -1,0 +1,32 @@
+<div id="compose-drawer" style="position:fixed;bottom:0;left:0;right:0;z-index:300;max-height:60vh;overflow-y:auto;background:var(--surface);border-top:2px solid var(--accent);display:flex;flex-direction:column;">
+  <div style="display:flex;align-items:center;gap:16px;padding:10px 24px;border-bottom:1px solid var(--rule);flex-shrink:0;">
+    <span style="font-family:var(--font-display);font-weight:600;font-size:0.9375rem;">
+      Composed context &middot; {{ count }} chunk{{ 's' if count != 1 else '' }}
+    </span>
+    <button
+      onclick="navigator.clipboard.writeText(document.getElementById('compose-text').value);"
+      style="font-size:0.6875rem;letter-spacing:0.10em;text-transform:uppercase;padding:3px 9px;">
+      copy
+    </button>
+    <button
+      onclick="(function(){
+        var blob = new Blob([document.getElementById('compose-text').value], {type:'text/markdown'});
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = 'composed-context.md';
+        a.click();
+        URL.revokeObjectURL(url);
+      })();"
+      style="font-size:0.6875rem;letter-spacing:0.10em;text-transform:uppercase;padding:3px 9px;">
+      save .md
+    </button>
+    <button
+      onclick="var d=document.getElementById('compose-drawer');if(d)d.remove();"
+      style="margin-left:auto;font-size:0.6875rem;letter-spacing:0.10em;text-transform:uppercase;padding:3px 9px;color:var(--muted);">
+      close
+    </button>
+  </div>
+  <textarea id="compose-text" readonly
+    style="width:100%;height:50vh;font-family:var(--font-mono);font-size:0.8125rem;background:var(--bg);color:var(--text);border:none;padding:16px 24px;resize:none;outline:none;">{{ markdown }}</textarea>
+</div>

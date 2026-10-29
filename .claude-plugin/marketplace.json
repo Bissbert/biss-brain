@@ -1,0 +1,18 @@
+{
+  "name": "bissbert",
+  "owner": {
+    "name": "Bissbert"
+  },
+  "metadata": {
+    "description": "Claude Code plugins by Bissbert"
+  },
+  "plugins": [
+    {
+      "name": "biss-brain",
+      "source": "./",
+      "description": "Local long-term memory for Claude Code: captures what you work on, recalls it in later sessions. Runs on your machine with Ollama and LanceDB.",
+      "category": "development",
+      "homepage": "https://github.com/Bissbert/biss-brain"
+    }
+  ]
+}

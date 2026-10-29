@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+
+{% block head_extra %}
+<meta http-equiv="refresh" content="30">
+{% endblock %}
+
+{% block content %}
+<style>
+  .status-header {
+    display: flex; align-items: flex-end; gap: 18px; flex-wrap: wrap;
+    margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--rule);
+  }
+  .status-header h1 { margin: 0; }
+
+  .stat-tiles {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin-bottom: 32px;
+  }
+  .stat-tile {
+    background: var(--bg);
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .stat-tile .tile-label {
+    font-family: var(--font-body);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--label);
+  }
+  .stat-tile .tile-value {
+    font-family: var(--font-mono);
+    font-feature-settings: 'tnum';
+    font-size: 1.25rem;
+    color: var(--text);
+    line-height: 1.2;
+  }
+  .stat-tile .tile-sub {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .plist-yes { color: var(--teal); }
+  .plist-no  { color: var(--muted); }
+
+  .error-box {
+    border: 1px solid var(--danger);
+    background: transparent;
+    padding: 14px 18px;
+    margin-bottom: 24px;
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    color: var(--danger);
+    line-height: 1.5;
+  }
+  .error-box .error-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+    display: block;
+  }
+  .error-ts {
+    font-size: 0.6875rem;
+    color: var(--muted);
+    margin-top: 6px;
+  }
+
+  .refresh-note {
+    font-size: 0.75rem;
+    color: var(--label);
+    margin-top: 12px;
+  }
+</style>
+
+<div class="status-header">
+  <div>
+    <div class="label" style="margin-bottom:4px;">Daemon</div>
+    <h1>Brain status</h1>
+  </div>
+</div>
+
+{% if status.dream_error %}
+<div class="error-box">
+  <span class="error-label">Dream error</span>
+  {{ status.dream_error | e }}
+  {% if status.last_error_ts %}
+  <div class="error-ts">at {{ status.last_error_ts | int | datetimeformat }}</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="stat-tiles">
+  <div class="stat-tile">
+    <span class="tile-label">Dream stage</span>
+    <span class="tile-value">{{ status.dream_stage or '—' }}</span>
+  </div>
+
+  <div class="stat-tile">
+    <span class="tile-label">Last complete</span>
+    <span class="tile-value" style="font-size:0.875rem;">
+      {% if status.last_complete_ts %}
+        {{ status.last_complete_ts | int | datetimeformat }}
+      {% else %}
+        —
+      {% endif %}
+    </span>
+  </div>
+
+  <div class="stat-tile">
+    <span class="tile-label">Edge queue depth</span>
+    <span class="tile-value">{{ status.edge_queue_depth }}</span>
+    <span class="tile-sub">undrained edge_bumps</span>
+  </div>
+
+  <div class="stat-tile">
+    <span class="tile-label">DMN plist</span>
+    <span class="tile-value {% if status.dmn_plist_exists %}plist-yes{% else %}plist-no{% endif %}">
+      {% if status.dmn_plist_exists %}&#10003;{% else %}&#10007;{% endif %}
+    </span>
+    <span class="tile-sub">ch.bissbert.biss-brain.dmn</span>
+  </div>
+
+  <div class="stat-tile">
+    <span class="tile-label">Dream plist</span>
+    <span class="tile-value {% if status.dream_plist_exists %}plist-yes{% else %}plist-no{% endif %}">
+      {% if status.dream_plist_exists %}&#10003;{% else %}&#10007;{% endif %}
+    </span>
+    <span class="tile-sub">ch.bissbert.biss-brain.dream</span>
+  </div>
+
+  <div class="stat-tile">
+    <span class="tile-label">Claude CLI failures</span>
+    <span class="tile-value {% if status.cli_failures_24h and status.cli_failures_24h > 0 %}plist-no{% else %}plist-yes{% endif %}">
+      {{ status.cli_failures_24h or 0 }}
+    </span>
+    <span class="tile-sub">last 24h (distill + judge)</span>
+  </div>
+</div>
+
+<p class="refresh-note">Status auto-refreshes every 30 s</p>
+{% endblock %}

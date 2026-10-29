@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .filter-bar {
+    display:flex; gap:18px; align-items:flex-end; flex-wrap:wrap;
+    border-bottom:1px solid var(--rule); padding-bottom:14px; margin-bottom:24px;
+  }
+  .filter-bar .field { display:flex; flex-direction:column; gap:6px; }
+  .filter-bar a.btn {
+    font-size:0.75rem; font-weight:500; letter-spacing:0.10em; text-transform:uppercase;
+    color:var(--muted); padding:4px 0; border-bottom:1px solid transparent;
+  }
+  .filter-bar a.btn:hover { color:var(--text); border-bottom-color:var(--rule); }
+  .filter-bar a.btn.active { color:var(--text); border-bottom-color:var(--accent); }
+  .filter-bar .range-list { display:flex; gap:18px; align-items:baseline; }
+
+  .stats {
+    display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr));
+    gap:0; margin-bottom:32px;
+    border-top:1px solid var(--rule); border-bottom:1px solid var(--rule);
+  }
+  .stat-tile {
+    padding:14px 18px; border-right:1px solid var(--rule);
+  }
+  .stat-tile:last-child { border-right:none; }
+  .stat-tile .label-stat {
+    font-size:0.6875rem; font-weight:500; letter-spacing:0.12em;
+    text-transform:uppercase; color:var(--label);
+  }
+  .stat-tile .value {
+    font-family:var(--font-mono); font-feature-settings:'tnum';
+    font-size:1.5rem; font-weight:500; color:var(--text); margin-top:6px;
+    line-height:1.1;
+  }
+  .stat-tile .value.small { font-size:0.875rem; }
+
+  .chart-wrap { margin-bottom:32px; }
+  .chart-wrap h2 { margin-bottom:14px; }
+  .empty-state { color:var(--muted); padding:60px 0; font-size:0.9375rem; border-top:1px solid var(--rule); border-bottom:1px solid var(--rule); text-align:center; }
+</style>
+
+<h1>Decay timeline</h1>
+
+<div class="filter-bar">
+  <div class="field">
+    <span class="label">Range</span>
+    <div class="range-list">
+      {% for d in [7, 30, 90, 365] %}
+      <a class="btn {% if days == d %}active{% endif %}"
+         href="/timeline?project={{ current_project }}&days={{ d }}&kind={{ kind }}">{{ d }}d</a>
+      {% endfor %}
+      <a class="btn {% if days == 3650 %}active{% endif %}"
+         href="/timeline?project={{ current_project }}&days=3650&kind={{ kind }}">all</a>
+    </div>
+  </div>
+  <form method="get" action="/timeline" style="display:contents">
+    <input type="hidden" name="project" value="{{ current_project }}">
+    <input type="hidden" name="days" value="{{ days }}">
+    <div class="field">
+      <span class="label">Kind</span>
+      <select name="kind" onchange="this.form.submit()">
+        <option value="all" {% if kind == 'all' %}selected{% endif %}>all kinds</option>
+        {% for k in kinds_present %}
+        <option value="{{ k }}" {% if k == kind %}selected{% endif %}>{{ k }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+{% if summary_total_chunks == 0 %}
+<div class="empty-state">No memories captured yet for this project.</div>
+{% else %}
+
+<div class="stats">
+  <div class="stat-tile"><div class="label-stat">Total</div><div class="value">{{ summary_total_chunks }}</div></div>
+  <div class="stat-tile"><div class="label-stat">Active</div><div class="value">{{ summary_active_chunks }}</div></div>
+  <div class="stat-tile"><div class="label-stat">Superseded</div><div class="value">{{ summary_superseded }}</div></div>
+  <div class="stat-tile"><div class="label-stat">Pinned</div><div class="value" style="color:var(--teal);">{{ summary_pinned }}</div></div>
+  <div class="stat-tile"><div class="label-stat">Mean decay</div>
+    <div class="value">{% if summary_mean_decay is not none %}{{ "%.2f"|format(summary_mean_decay) }}{% else %}—{% endif %}</div></div>
+  <div class="stat-tile"><div class="label-stat">Earliest</div>
+    <div class="value small">{% if summary_earliest_ts %}{{ summary_earliest_ts|datetimeformat }}{% else %}—{% endif %}</div></div>
+</div>
+
+<div class="chart-wrap">
+  <h2>Chunks per day, by kind</h2>
+  <div id="chart-bars"></div>
+</div>
+<div class="chart-wrap">
+  <h2>Mean decay over time</h2>
+  <div id="chart-decay"></div>
+</div>
+
+{% endif %}
+
+<script>const data = {{ data_json|safe }};</script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/dist/plot.umd.min.js" defer></script>
+<script>
+window.addEventListener("load", function() {
+  if (!window.Plot || !data.bins || data.bins.length === 0) return;
+
+  const TEXT = "#e2e8f0";
+  const MUTED = "#94a3b8";
+  const RULE = "rgba(148,163,184,0.18)";
+  const ACCENT = "#9333ea";
+
+  const bins = data.bins.map(function(b) {
+    return Object.assign({}, b, { day: new Date(b.day + "T00:00:00Z") });
+  });
+
+  var barChart = Plot.plot({
+    width: 920, height: 280,
+    style: { background: "transparent", color: TEXT, fontFamily: "Hanken Grotesk, sans-serif" },
+    x: { label: null, type: "utc" },
+    y: { label: "chunks/day", grid: true },
+    color: { legend: true, scheme: "tableau10" },
+    marks: [
+      Plot.rectY(bins, { x: "day", y: "count", fill: "kind", interval: "day", tip: true }),
+      Plot.ruleY([0], { stroke: RULE })
+    ]
+  });
+  document.getElementById("chart-bars").appendChild(barChart);
+
+  var dayMap = {};
+  data.bins.forEach(function(b) {
+    if (!dayMap[b.day]) dayMap[b.day] = { sum: 0, n: 0 };
+    if (b.mean_decay !== null) {
+      dayMap[b.day].sum += b.mean_decay * b.count;
+      dayMap[b.day].n += b.count;
+    }
+  });
+  var decayByDay = Object.keys(dayMap).sort().map(function(d) {
+    var v = dayMap[d];
+    return { day: new Date(d + "T00:00:00Z"), mean_decay: v.n > 0 ? v.sum / v.n : null };
+  }).filter(function(r) { return r.mean_decay !== null; });
+
+  var decayChart = Plot.plot({
+    width: 920, height: 220,
+    style: { background: "transparent", color: TEXT, fontFamily: "Hanken Grotesk, sans-serif" },
+    x: { label: null, type: "utc" },
+    y: { label: "mean decay", grid: true, domain: [0, 1] },
+    marks: [
+      Plot.lineY(decayByDay, { x: "day", y: "mean_decay", curve: "monotone-x", stroke: ACCENT, strokeWidth: 1.5 }),
+      Plot.ruleY([0], { stroke: RULE })
+    ]
+  });
+  document.getElementById("chart-decay").appendChild(decayChart);
+});
+</script>
+{% endblock %}

@@ -1,0 +1,10 @@
+**/__pycache__/
+*.pyc
+.venv/
+*.log
+.DS_Store
+ui/projections/
+ui/__pycache__/
+.claude/worktrees/
+.claude/UPGRADE-BRIEF.md
+.venv-build.lock/

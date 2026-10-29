@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block content %}
+<div style="display:grid;grid-template-columns:200px 1fr;gap:48px;align-items:start;">
+
+  <aside>
+    <div class="label" style="margin-bottom:12px;">Sessions</div>
+    <div style="font-family:var(--font-mono);font-size:0.8125rem;color:var(--text);font-feature-settings:'tnum';line-height:1.7;">
+      {{ sessions | length }} captured
+    </div>
+    <div class="label" style="margin-top:24px;margin-bottom:6px;">Project</div>
+    <code style="display:block;font-size:0.75rem;color:var(--muted);word-break:break-all;line-height:1.6;">{{ current_project }}</code>
+  </aside>
+
+  <section>
+    <h1>Sessions</h1>
+
+    {% if sessions %}
+    <div style="overflow-x:auto;">
+      <table style="width:100%;border-collapse:collapse;font-size:0.875rem;">
+        <thead>
+          <tr>
+            <th class="label" style="text-align:left;padding:6px 14px 8px 0;font-weight:500;border-bottom:1px solid var(--rule);">Session</th>
+            <th class="label" style="text-align:left;padding:6px 14px 8px;font-weight:500;border-bottom:1px solid var(--rule);">Started</th>
+            <th class="label" style="text-align:left;padding:6px 14px 8px;font-weight:500;border-bottom:1px solid var(--rule);">Ended</th>
+            <th class="label" style="text-align:right;padding:6px 14px 8px;font-weight:500;border-bottom:1px solid var(--rule);">Chunks</th>
+            <th class="label" style="text-align:left;padding:6px 14px 8px;font-weight:500;border-bottom:1px solid var(--rule);">Kinds</th>
+            <th class="label" style="text-align:right;padding:6px 14px 8px;font-weight:500;border-bottom:1px solid var(--rule);">Sup.</th>
+            <th class="label" style="text-align:right;padding:6px 14px 8px;font-weight:500;border-bottom:1px solid var(--rule);">Pinned</th>
+            <th style="border-bottom:1px solid var(--rule);"></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for s in sessions %}
+          <tr style="border-bottom:1px solid var(--rule);height:34px;"
+              onmouseover="this.style.background='rgba(148,163,184,0.04)'"
+              onmouseout="this.style.background=''">
+            <td style="padding:6px 14px 6px 0;">
+              <code style="font-size:0.8125rem;" title="{{ s.session_id }}">{{ s.session_id_short }}</code>
+            </td>
+            <td style="padding:6px 14px;font-family:var(--font-mono);font-feature-settings:'tnum';color:var(--muted);font-size:0.75rem;white-space:nowrap;">
+              {{ s.started_ts | relative_time }}
+            </td>
+            <td style="padding:6px 14px;font-family:var(--font-mono);font-feature-settings:'tnum';color:var(--muted);font-size:0.75rem;white-space:nowrap;">
+              {{ s.ended_ts | relative_time }}
+            </td>
+            <td style="padding:6px 14px;text-align:right;font-family:var(--font-mono);font-feature-settings:'tnum';">{{ s.chunk_count }}</td>
+            <td style="padding:6px 14px;">
+              {% for k in s.kinds %}
+              <span class="badge" style="margin-right:4px;">{{ k }}</span>
+              {% endfor %}
+            </td>
+            <td style="padding:6px 14px;text-align:right;font-family:var(--font-mono);font-feature-settings:'tnum';color:{% if s.superseded_count %}var(--danger){% else %}var(--label){% endif %};">
+              {{ s.superseded_count }}
+            </td>
+            <td style="padding:6px 14px;text-align:right;font-family:var(--font-mono);font-feature-settings:'tnum';color:{% if s.pinned_count %}var(--teal){% else %}var(--label){% endif %};">
+              {{ s.pinned_count }}
+            </td>
+            <td style="padding:6px 0 6px 14px;">
+              <a href="/session/{{ s.session_id }}?project={{ current_project }}"
+                 style="font-size:0.75rem;color:var(--muted);">→</a>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="border-top:1px solid var(--rule);border-bottom:1px solid var(--rule);padding:32px 0;color:var(--muted);">
+      No sessions captured yet for this project.
+    </div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

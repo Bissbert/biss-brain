@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block head_extra %}
+<style>
+  mark {
+    background: rgba(147, 51, 234, 0.25);
+    color: var(--text);
+    border-radius: 0;
+    padding: 0 1px;
+  }
+</style>
+{% endblock %}
+{% block content %}
+<style>
+  .search-grid { display:grid; grid-template-columns:200px 1fr; gap:48px; align-items:start; }
+  .search-margin .label { margin-bottom:12px; }
+  .search-margin .meta {
+    font-family:var(--font-mono); font-size:0.8125rem; color:var(--text);
+    font-feature-settings:'tnum'; line-height:1.7;
+  }
+
+  .search-bar {
+    display:flex; gap:24px; flex-wrap:wrap; align-items:flex-end;
+    border-bottom:1px solid var(--rule); padding-bottom:16px; margin-bottom:24px;
+  }
+  .search-bar .field { display:flex; flex-direction:column; gap:6px; }
+  .search-bar .field.grow { flex:1; min-width:260px; }
+  .search-bar input[name="q"] { width:100%; font-size:1rem; padding:6px 0; }
+  .search-bar select { font-size:0.875rem; }
+  .search-bar label.inline {
+    display:flex; align-items:center; gap:8px;
+    font-size:0.75rem; font-weight:500; letter-spacing:0.10em;
+    text-transform:uppercase; color:var(--muted); padding-bottom:6px;
+  }
+  .search-bar button { padding:6px 18px; }
+
+  input[type="date"] {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--rule);
+    border-radius: 0;
+    padding: 6px 0;
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+  }
+  input[type="date"]:focus {
+    outline: none;
+    border-bottom-color: var(--accent);
+  }
+
+  .result-meta {
+    font-size:0.75rem; color:var(--muted); margin-bottom:16px;
+    letter-spacing:0.04em;
+  }
+  .result-meta em { font-style:normal; color:var(--text); }
+</style>
+
+<div class="search-grid">
+
+  <aside class="search-margin">
+    <div class="label">Search</div>
+    <div class="meta">
+      {% if q %}query · {{ q | length }} chars{% else %}—{% endif %}
+    </div>
+    <div class="label" style="margin-top:24px;">Project</div>
+    <code style="display:block;font-size:0.75rem;color:var(--muted);word-break:break-all;line-height:1.6;">{{ current_project or '—' }}</code>
+    {% if total_count is defined and total_count %}
+    <div class="label" style="margin-top:24px;">Total</div>
+    <div class="meta">{{ total_count }} matching</div>
+    {% endif %}
+  </aside>
+
+  <section>
+    <h1>Search</h1>
+
+    <form
+      hx-get="/search"
+      hx-target="#results"
+      hx-trigger="submit, keyup changed delay:400ms from:input[name=q], change from:select, change from:input[type=date], change from:input[type=number], change from:input[type=checkbox]"
+      hx-include="closest form"
+      hx-push-url="true"
+      class="search-bar">
+      <input type="hidden" name="project" value="{{ current_project }}">
+
+      <div class="field grow">
+        <span class="label">Query</span>
+        <input type="text" name="q" value="{{ q }}" placeholder="Search chunks…" autocomplete="off">
+      </div>
+
+      <div class="field">
+        <span class="label">Kind</span>
+        <select name="kind">
+          <option value="">all kinds</option>
+          {% for k in kinds_present %}
+          <option value="{{ k }}" {% if k == kind %}selected{% endif %}>{{ k }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div class="field">
+        <span class="label">From</span>
+        <input type="date" name="from_date" value="{{ from_date }}">
+      </div>
+
+      <div class="field">
+        <span class="label">To</span>
+        <input type="date" name="to_date" value="{{ to_date }}">
+      </div>
+
+      <div class="field">
+        <span class="label">Session</span>
+        <input type="text" name="session" value="{{ session }}" placeholder="session id" style="width:120px;">
+      </div>
+
+      <div class="field">
+        <span class="label">Salience ≥</span>
+        <input type="number" name="salience_min" min="0" max="100" step="10" value="{{ salience_min }}" style="width:60px;">
+      </div>
+
+      <div class="field">
+        <span class="label">Round ≥</span>
+        <input type="number" name="round_min" min="0" value="{{ round_min }}" style="width:50px;">
+      </div>
+
+      <div class="field">
+        <span class="label">Per page</span>
+        <select name="limit">
+          {% for n in [20, 50, 100, 200] %}
+          <option value="{{ n }}" {% if n == limit %}selected{% endif %}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <label class="inline">
+        <input type="checkbox" name="pinned_only" value="1"
+          {% if pinned_only %}checked{% endif %}>
+        Pinned only
+      </label>
+
+      <label class="inline">
+        <input type="checkbox" name="include_superseded" value="1"
+          {% if include_superseded %}checked{% endif %}>
+        Superseded
+      </label>
+
+      <button type="submit">Search</button>
+    </form>
+
+    <div id="results">
+      {% include "_search_results.html" %}
+    </div>
+  </section>
+</div>
+{% endblock %}

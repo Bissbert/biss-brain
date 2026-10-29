@@ -1,0 +1,326 @@
+{
+  "dense/inject": {
+    "decay of sibling memories": [
+      "17",
+      "15",
+      "29"
+    ],
+    "edges between chunks retrieved together": [
+      "28",
+      "23",
+      "8"
+    ],
+    "embedding server": [
+      "4",
+      "12",
+      "15"
+    ],
+    "how does hybrid search work": [
+      "4",
+      "23",
+      "12"
+    ],
+    "nightly consolidation of sessions": [
+      "28",
+      "7",
+      "19"
+    ],
+    "secrets removal before storing": [
+      "12",
+      "1",
+      "23"
+    ]
+  },
+  "dense/mcp": {
+    "decay of sibling memories": [
+      "3c1ba78b",
+      "2a219e20",
+      "0465619a",
+      "98da6b92"
+    ],
+    "edges between chunks retrieved together": [
+      "148599ae",
+      "661a9f14",
+      "343d77fb",
+      "98da6b92"
+    ],
+    "embedding server": [
+      "fd5c7817",
+      "31b032d8",
+      "2a219e20",
+      "98da6b92"
+    ],
+    "how does hybrid search work": [
+      "fd5c7817",
+      "661a9f14",
+      "31b032d8",
+      "dfd37440"
+    ],
+    "nightly consolidation of sessions": [
+      "148599ae",
+      "4c29fda3",
+      "98da6b92",
+      "9a1e0393"
+    ],
+    "secrets removal before storing": [
+      "31b032d8",
+      "2725aea2",
+      "661a9f14",
+      "343d77fb"
+    ]
+  },
+  "dense/recall": {
+    "decay of sibling memories": [
+      "3c1ba78b",
+      "2a219e20",
+      "0465619a",
+      "98da6b92"
+    ],
+    "edges between chunks retrieved together": [
+      "148599ae",
+      "661a9f14",
+      "343d77fb",
+      "98da6b92"
+    ],
+    "embedding server": [
+      "fd5c7817",
+      "31b032d8",
+      "2a219e20",
+      "98da6b92"
+    ],
+    "how does hybrid search work": [
+      "fd5c7817",
+      "661a9f14",
+      "31b032d8",
+      "dfd37440"
+    ],
+    "nightly consolidation of sessions": [
+      "148599ae",
+      "4c29fda3",
+      "98da6b92",
+      "9a1e0393"
+    ],
+    "secrets removal before storing": [
+      "31b032d8",
+      "2725aea2",
+      "661a9f14",
+      "343d77fb"
+    ]
+  },
+  "hybrid/inject": {
+    "decay of sibling memories": [
+      "15",
+      "25",
+      "5"
+    ],
+    "edges between chunks retrieved together": [
+      "15",
+      "4",
+      "16"
+    ],
+    "embedding server": [
+      "19",
+      "23",
+      "9"
+    ],
+    "how does hybrid search work": [
+      "0",
+      "4",
+      "23"
+    ],
+    "nightly consolidation of sessions": [
+      "12",
+      "2",
+      "22"
+    ],
+    "secrets removal before storing": [
+      "7",
+      "17",
+      "12"
+    ]
+  },
+  "hybrid/mcp": {
+    "decay of sibling memories": [
+      "2a219e20",
+      "44cdffcd",
+      "c1f90d72",
+      "3c1ba78b"
+    ],
+    "edges between chunks retrieved together": [
+      "2a219e20",
+      "fd5c7817",
+      "f2e2825a",
+      "b987f68f"
+    ],
+    "embedding server": [
+      "98da6b92",
+      "661a9f14",
+      "a8bb47b7",
+      "dfd37440"
+    ],
+    "how does hybrid search work": [
+      "b18efa84",
+      "fd5c7817",
+      "661a9f14",
+      "dfd37440"
+    ],
+    "nightly consolidation of sessions": [
+      "31b032d8",
+      "b6f3c158",
+      "d238b8e1",
+      "148599ae"
+    ],
+    "secrets removal before storing": [
+      "4c29fda3",
+      "3c1ba78b",
+      "31b032d8",
+      "661a9f14"
+    ]
+  },
+  "hybrid/recall": {
+    "decay of sibling memories": [
+      "2a219e20",
+      "44cdffcd",
+      "c1f90d72",
+      "3c1ba78b"
+    ],
+    "edges between chunks retrieved together": [
+      "2a219e20",
+      "fd5c7817",
+      "f2e2825a",
+      "b987f68f"
+    ],
+    "embedding server": [
+      "98da6b92",
+      "661a9f14",
+      "a8bb47b7",
+      "dfd37440"
+    ],
+    "how does hybrid search work": [
+      "b18efa84",
+      "fd5c7817",
+      "661a9f14",
+      "dfd37440"
+    ],
+    "nightly consolidation of sessions": [
+      "31b032d8",
+      "b6f3c158",
+      "d238b8e1",
+      "148599ae"
+    ],
+    "secrets removal before storing": [
+      "4c29fda3",
+      "3c1ba78b",
+      "31b032d8",
+      "661a9f14"
+    ]
+  },
+  "hybrid_summary/inject": {
+    "decay of sibling memories": [
+      "15",
+      "25",
+      "5"
+    ],
+    "edges between chunks retrieved together": [
+      "15",
+      "4",
+      "16"
+    ],
+    "embedding server": [
+      "19",
+      "23",
+      "9"
+    ],
+    "how does hybrid search work": [
+      "0",
+      "4",
+      "23"
+    ],
+    "nightly consolidation of sessions": [
+      "12",
+      "2",
+      "22"
+    ],
+    "secrets removal before storing": [
+      "7",
+      "17",
+      "12"
+    ]
+  },
+  "hybrid_summary/mcp": {
+    "decay of sibling memories": [
+      "3c1ba78b",
+      "661a9f14",
+      "f2e2825a",
+      "b6f3c158"
+    ],
+    "edges between chunks retrieved together": [
+      "f2e2825a",
+      "9a1e0393",
+      "661a9f14",
+      "3c1ba78b"
+    ],
+    "embedding server": [
+      "661a9f14",
+      "dfd37440",
+      "a8bb47b7",
+      "3c1ba78b"
+    ],
+    "how does hybrid search work": [
+      "661a9f14",
+      "dfd37440",
+      "3c1ba78b",
+      "b6f3c158"
+    ],
+    "nightly consolidation of sessions": [
+      "b6f3c158",
+      "661a9f14",
+      "3c1ba78b",
+      "f2e2825a"
+    ],
+    "secrets removal before storing": [
+      "3c1ba78b",
+      "661a9f14",
+      "b6f3c158",
+      "a8bb47b7"
+    ]
+  },
+  "hybrid_summary/recall": {
+    "decay of sibling memories": [
+      "3c1ba78b",
+      "661a9f14",
+      "f2e2825a",
+      "b6f3c158"
+    ],
+    "edges between chunks retrieved together": [
+      "f2e2825a",
+      "9a1e0393",
+      "661a9f14",
+      "3c1ba78b"
+    ],
+    "embedding server": [
+      "661a9f14",
+      "dfd37440",
+      "a8bb47b7",
+      "3c1ba78b"
+    ],
+    "how does hybrid search work": [
+      "661a9f14",
+      "dfd37440",
+      "3c1ba78b",
+      "b6f3c158"
+    ],
+    "nightly consolidation of sessions": [
+      "b6f3c158",
+      "661a9f14",
+      "3c1ba78b",
+      "f2e2825a"
+    ],
+    "secrets removal before storing": [
+      "3c1ba78b",
+      "661a9f14",
+      "b6f3c158",
+      "a8bb47b7"
+    ]
+  }
+}

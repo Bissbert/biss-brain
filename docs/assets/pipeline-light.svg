@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 400" width="980" height="400" role="img" aria-label="How biss-brain works: hooks queue events, a flush daemon distills and embeds them into a local store, recall injects them into later sessions, and a nightly dream pass consolidates the store.">
+  <defs>
+    <marker id="m0" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#8250df"/></marker>
+    <marker id="m1" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#0969da"/></marker>
+    <marker id="m2" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#d4a72c"/></marker>
+  </defs>
+  <path d="M210 100 H252" fill="none" stroke="#8250df" stroke-width="2" marker-end="url(#m0)"/>
+  <path d="M470 100 H512" fill="none" stroke="#8250df" stroke-width="2" marker-end="url(#m0)"/>
+  <path d="M730 100 H772" fill="none" stroke="#8250df" stroke-width="2" marker-end="url(#m0)"/>
+  <path d="M830 160 V200 H245 V252" fill="none" stroke="#0969da" stroke-width="2" marker-end="url(#m1)"/>
+  <path d="M115 260 V168" fill="none" stroke="#0969da" stroke-width="2" marker-end="url(#m1)"/>
+  <path d="M905 160 V252" fill="none" stroke="#d4a72c" stroke-width="2" marker-end="url(#m2)" marker-start="url(#m2)"/>
+  <text x="500" y="192" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="13" fill="#57606a" text-anchor="middle">hybrid search: BM25 + vectors</text>
+  <rect x="20" y="40" width="190" height="120" rx="12" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+  <text x="38" y="72" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#1f2328">Claude Code</text>
+  <text x="38" y="98" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">your sessions</text>
+  <text x="38" y="120" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">and subagents</text>
+  <rect x="260" y="40" width="210" height="120" rx="12" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+  <text x="278" y="72" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#1f2328">Hooks</text>
+  <text x="278" y="98" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">Stop · SubagentStop</text>
+  <text x="278" y="120" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">PreCompact · SessionEnd</text>
+  <text x="278" y="142" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">queue an event, exit</text>
+  <rect x="520" y="40" width="210" height="120" rx="12" fill="#ffffff" stroke="#d0d7de" stroke-width="1.5"/>
+  <text x="538" y="72" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#1f2328">Flush daemon</text>
+  <text x="538" y="98" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">scrub secrets</text>
+  <text x="538" y="120" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">distill · claude -p</text>
+  <text x="538" y="142" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">embed · Ollama</text>
+  <rect x="780" y="40" width="180" height="120" rx="12" fill="#ffffff" stroke="#8250df" stroke-width="1.5"/>
+  <text x="798" y="72" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#1f2328">Brain store</text>
+  <text x="798" y="98" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">LanceDB + SQLite</text>
+  <text x="798" y="120" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">~/.claude/brain</text>
+  <rect x="20" y="260" width="450" height="120" rx="12" fill="#ffffff" stroke="#0969da" stroke-width="1.5"/>
+  <text x="38" y="292" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#1f2328">Recall</text>
+  <text x="38" y="318" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">SessionStart: core memory + recent decisions</text>
+  <text x="38" y="340" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">MCP tool search_memory, /biss-brain:recall</text>
+  <text x="38" y="362" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">web UI: /biss-brain:ui</text>
+  <rect x="620" y="260" width="340" height="120" rx="12" fill="#fff8e6" stroke="#d4a72c" stroke-width="1.5"/>
+  <text x="638" y="292" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="600" fill="#1f2328">Nightly dream · 03:00</text>
+  <text x="638" y="318" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">links · conflict sweep · decay</text>
+  <text x="638" y="340" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" fill="#57606a">session arcs · core proposals</text>
+</svg>

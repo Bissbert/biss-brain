@@ -1,0 +1,202 @@
+# biss-brain configuration. Copy to ~/.claude/brain/config.toml and edit.
+
+[distill]
+# "claude_code" uses `claude -p` headless. "passthrough" skips distillation
+# (raw text gets embedded — useful for debugging). "ollama" uses local model.
+backend = "claude_code"
+# Backends tried in order when the primary returns nothing ("claude_code",
+# "ollama"; never "passthrough"). Only the session distill falls back. With
+# "ollama" in the chain, windows are sized for its context (24k chars), so
+# Claude gets about twice as many, smaller calls.
+fallback = []
+# A failed segment (distill or embed error, or a reply that is not the asked-for
+# JSON) is retried after base, 2*base, ... seconds, capped at max. What was
+# stored before the failure stays stored.
+retry_base_seconds = 60
+retry_max_seconds = 3600
+# Only a window whose reply is invalid this many times in a row is skipped, and
+# recorded in <project>/pending/skipped.jsonl (where, not what).
+skip_invalid_after = 5
+
+[distill.models]
+# Per-event model selection. Override individually as needed.
+stop = "haiku"
+subagent_stop = "haiku"
+pre_compact = "sonnet"
+conflict_judge = "haiku"
+
+[distill.ollama]
+# Used only when backend = "ollama".
+model = "qwen2.5-coder:14b-instruct"
+
+[debounce]
+# Stop only records the transcript offset. A session segment is distilled once,
+# when it closes: at SessionEnd or PreCompact, after segment_idle_seconds with
+# no new Stop, or at segment_max_events queued Stops.
+segment_idle_seconds = 600
+segment_max_events = 20
+# A finished subagent's own transcript is distilled after this delay.
+subagent_stop_seconds = 10
+# The daemon exits after this long with an empty queue (never while a segment is open).
+idle_exit_seconds = 300
+# Only for queue files written before v0.7 (inline excerpts):
+stop_seconds = 30
+max_events_per_batch = 50
+
+[embed]
+backend = "ollama"
+# nomic-embed-text (768-dim) is the default; switch to bge-m3 (1024-dim) if pulled
+model = "nomic-embed-text"
+dim = 768
+endpoint = "http://127.0.0.1:11434"
+# Embedder down when a chunk is stored: keep the distilled chunk without a
+# vector (found by keyword search only) and embed it later, probing at most
+# once per interval. Off: the segment is retried, distill included.
+store_without_vector = true
+backfill_interval_seconds = 60
+
+[retrieve]
+session_start_top_k = 3
+mcp_default_top_k = 5
+hybrid = true
+rerank = false  # TODO: wire bge-reranker-v2-m3
+# Ranking: relevance (normalised to the best candidate) × decay_score ** decay_weight.
+# 0 ignores decay; small values let decay break near-ties only. On the v0.7 eval 0.05
+# ties 0.1 on nomic and the stored tables, helps snowflake, and 0.2+ costs MRR.
+decay_weight = 0.05
+# Candidate pool searched before ranking: max(top_k × pool_factor, pool_min).
+pool_factor = 5
+pool_min = 25
+
+# UserPromptSubmit injection: relevant memory added before the model sees each
+# prompt. Slash commands, `!` bash prompts, acks ("yes do it", "thanks") and
+# prompts under inject_min_words words are skipped. Items already injected in
+# this session are not repeated.
+user_prompt_inject = false
+# After a compaction restored from the raw digest, inject the distilled summary
+# once on the first prompt after it is stored. Independent of user_prompt_inject.
+compact_late_restore = true
+# Gate: a memory is injected when its cosine to the prompt is >= inject_min_cosine
+# OR its BM25 score is >= inject_min_bm25 (0 turns the lexical side off). Fit with
+# scripts/eval/calibrate_inject.py on the v0.7 eval. In-sample precision is 0.81
+# (real, 95 % CI 0.62-0.91) and 0.75 (synthetic, 0.51-0.90); fit on one suite and
+# scored on the other it is 0.60-0.68. Off-topic abstention is 94-100 % and no
+# poisoned items are injected. The cosine value is specific to nomic-embed-text.
+# BM25 grows with corpus size, so on a small or fresh store the lexical side
+# rarely fires. Re-fit after changing the model or once the store has grown.
+inject_min_cosine = 0.6
+inject_min_bm25 = 7.0
+# Memories injected per prompt (top 2 drops precision to ~0.63 on the real eval).
+inject_top_k = 1
+# Character budget for injected text (~1,500 tokens).
+inject_max_chars = 6000
+inject_min_words = 3
+# Embed budget; when exceeded the prompt is matched on BM25 alone.
+inject_embed_ms = 300
+# Hard deadline for the whole hook, counted from process start (imports included);
+# past it nothing is injected. Measured on a 5.8 MB store: p50 1.3 s, p95 1.7 s,
+# almost all of it the ~0.8 s lancedb import. Disabled, killed and trivial
+# prompts exit in ~70 ms without loading lancedb.
+inject_deadline_ms = 2500
+
+[hygiene]
+dedup_cosine = 0.94
+decay_half_life_days = 30
+# Per-retrieval boost in the nightly decay pass (0.2 before v0.7; 0 = off).
+decay_usage_boost = 0.0
+pin_immune = true
+# Auto-judge newly inserted chunks against similar existing ones for contradictions.
+conflict_judge_enabled = true
+# Only judge against an existing chunk at least this similar (cosine, -1.0 to 1.0).
+conflict_cosine = 0.85
+
+[provenance]
+# v0.7: every memory records its source (user, assistant, file, tool, web,
+# distilled, imported), a trust score and its taint (the raw sources that fed it).
+# A derived memory is never more trusted than its least-trusted input.
+# Memories tainted by these sources are never auto-injected (SessionStart,
+# UserPromptSubmit); they stay searchable, ranked lower and labelled.
+no_inject_sources = ["tool", "web"]
+# Imperative text ("always…", "remember as an instruction…") from these
+# untrusted sources is quarantined instead of stored as a normal memory.
+quarantine_imperatives = true
+
+[provenance.trust]
+user = 1.0
+assistant = 0.8
+file = 0.7
+tool = 0.5
+imported = 0.5
+web = 0.3
+
+[provenance.rank_multiplier]
+# Search score multiplier by taint (the lowest applicable value wins).
+tool = 0.6
+web = 0.6
+
+[capture]
+# A segment is packed into windows of this many chars, one distill call each;
+# past segment_max_windows the oldest windows are skipped (and logged).
+segment_window_chars = 48000
+segment_max_windows = 3
+# Raw transcript bytes read per segment, at most (harness records are large).
+raw_tail_bytes = 2000000
+# Scrub secrets (API keys, tokens, passwords) from excerpts before embedding.
+scrub_secrets = true
+# Conversation tail (chars) restored after compaction until the summary is distilled.
+compact_digest_chars = 6000
+
+[scope]
+# Hooks capture and inject nothing in these directories. "~" and "/" match
+# exactly; every other entry matches the directory and everything below it.
+exclude = ["~", "~/Downloads", "~/Library", "~/.claude", "/tmp"]
+# When set, only directories under one of these are in scope.
+include_only = []
+# Per project: a `.biss-brain-ignore` file, or `.claude/brain.toml` with
+# `enabled = false`, in the project or any parent turns the hooks off there.
+
+[core]
+# Core memory: curated notes injected in full at session start (see README).
+inject = true
+max_items = 200              # bullets injected; extras are announced, never cut silently
+warn_ratio = 0.8             # doctor warns at this share of max_items
+proposals_per_dream = 5      # dream stage 2c queue limit per project
+propose_min_retrievals = 3   # a chunk must be recalled this often to be proposed
+
+[dream]
+# Nightly "dream" pass: extends the decay job into a multi-stage offline
+# consolidation. Stage 1 = backlinks + conflict + decay (cheap, no LLM beyond
+# the existing Haiku judge). Stage 2 = LLM-driven session arc summaries.
+# Disable to fall back to decay-only behaviour.
+enabled = true
+# Skip arc-building for sessions whose newest chunk is younger than this.
+# Stops the dream pass from prematurely consolidating an in-progress session.
+session_cooldown_hours = 6
+# Minimum number of raw chunks required before a session is summarised.
+min_chunks_per_arc = 3
+# Roll up session arcs by date into a kind='daily_summary' chunk. Off by
+# default — most low-volume projects don't benefit from a second layer.
+daily_summary_enabled = false
+# When true, recall.py prefers arc/daily_summary chunks over raw distillations.
+# Off by default until you've validated the summaries on real data.
+prefer_summaries_in_recall = false
+
+[dream.models]
+# Distillation model for arcs (one call per session per night) and daily roll-ups.
+arc = "haiku"
+daily = "sonnet"
+
+[dream.stage1]
+# Stage 1a: re-link chunks to neighbours that didn't exist at insert time.
+backlink_refresh = true
+# Stage 1b: run the conflict judge against recently-added chunks.
+conflict_sweep = true
+# Cosine similarity gate above which the judge is invoked. Lower = more calls.
+conflict_sim_threshold = 0.85
+# How far back the conflict sweep looks (hours). Older chunks are skipped.
+candidate_window_hours = 24
+
+[rif]
+# Retrieval-induced forgetting: lower the decay of memories that compete with a
+# hit. Off since v0.7 (hurt recall, ~170 ms per read; see docs/eval/v0.7-ablation.md).
+enabled = false

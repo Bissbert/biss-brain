@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>biss-brain inspector</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@500;600;700&family=Hanken+Grotesk:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/htmx.org@2.0.4" defer></script>
+  {% block head_extra %}{% endblock %}
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0e0e16;
+      --surface: #13131c;
+      --border: rgba(148,163,184,0.12);
+      --rule: rgba(148,163,184,0.18);
+      --rule-strong: rgba(148,163,184,0.32);
+      --text: #e2e8f0;
+      --muted: #94a3b8;
+      --label: #64748b;
+      --accent: #9333ea;
+      --accent-hover: #a855f7;
+      --teal: #2dd4bf;
+      --danger: #f43f5e;
+      --success: #2dd4bf;
+      --radius: 0;
+      --nav-h: 52px;
+      --font-display: "Schibsted Grotesk", ui-sans-serif, system-ui, sans-serif;
+      --font-body: "Hanken Grotesk", ui-sans-serif, system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+    }
+    html, body { min-height: 100%; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      font-size: 0.875rem;
+      font-weight: 400;
+      line-height: 1.55;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    code, pre, .mono, .num {
+      font-family: var(--font-mono);
+      font-feature-settings: "tnum", "zero";
+      font-variant-numeric: tabular-nums slashed-zero;
+    }
+
+    a {
+      color: var(--text);
+      text-decoration: none;
+      border-bottom: 1px solid transparent;
+      transition: border-color .12s, color .12s;
+    }
+    a:hover { border-bottom-color: var(--accent); }
+    a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    nav {
+      position: sticky; top: 0; z-index: 100;
+      height: var(--nav-h);
+      display: flex; align-items: center; gap: 28px;
+      background: rgba(14,14,22,0.94);
+      border-bottom: 1px solid var(--rule);
+      padding: 0 32px;
+    }
+    nav .brand {
+      font-family: var(--font-display);
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      font-size: 0.9375rem;
+      text-transform: uppercase;
+      color: var(--text);
+      display: inline-flex; align-items: center; gap: 10px;
+    }
+    nav .brand::before {
+      content: "";
+      display: inline-block;
+      width: 6px; height: 6px;
+      background: var(--accent);
+    }
+    nav select {
+      background: transparent;
+      color: var(--text);
+      border: none;
+      border-bottom: 1px solid var(--rule);
+      border-radius: 0;
+      padding: 4px 22px 4px 0;
+      font-family: var(--font-body);
+      font-size: 0.8125rem;
+      max-width: 280px;
+      appearance: none;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+      background-position: calc(100% - 11px) 55%, calc(100% - 6px) 55%;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+      cursor: pointer;
+    }
+    nav select:focus { outline: none; border-bottom-color: var(--accent); }
+
+    nav .nav-links { display: flex; gap: 24px; margin-left: auto; }
+    nav .nav-links a {
+      font-family: var(--font-body);
+      font-size: 0.75rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 4px 0;
+      border-bottom: 1px solid transparent;
+    }
+    nav .nav-links a:hover { color: var(--text); border-bottom-color: var(--rule); }
+    nav .nav-links a.active { color: var(--text); border-bottom-color: var(--accent); }
+
+    main {
+      padding: 40px 48px 80px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    h1, h2, h3 {
+      font-family: var(--font-display);
+      font-weight: 600;
+      letter-spacing: -0.005em;
+      color: var(--text);
+    }
+    h1 { font-size: 1.5625rem; line-height: 1.2; margin-bottom: 24px; }
+    h2 { font-size: 1.25rem; line-height: 1.3; margin-bottom: 14px; }
+    h3 { font-size: 1rem; line-height: 1.35; margin-bottom: 10px; }
+
+    .label, .smallcaps {
+      font-family: var(--font-body);
+      font-size: 0.6875rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--label);
+    }
+
+    /* Cards reframed as ruled rows: hairline top rule, no fill, no rounded box */
+    .card {
+      background: transparent;
+      border: none;
+      border-top: 1px solid var(--rule);
+      border-radius: 0;
+      padding: 14px 0;
+      margin-bottom: 0;
+    }
+    .card:last-of-type { border-bottom: 1px solid var(--rule); }
+
+    /* Badges as small-caps tags, square, hairline */
+    .badge {
+      display: inline-block;
+      font-family: var(--font-body);
+      font-size: 0.6875rem;
+      font-weight: 500;
+      letter-spacing: 0.10em;
+      text-transform: lowercase;
+      padding: 1px 7px;
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      background: transparent;
+      color: var(--muted);
+    }
+    .badge.accent {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: transparent;
+    }
+
+    code {
+      font-family: var(--font-mono);
+      font-size: 0.8125rem;
+      font-feature-settings: "tnum", "zero";
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: var(--text);
+    }
+
+    /* Form controls — flat, hairline, no rounded boxes */
+    button, input, select, textarea {
+      font-family: inherit;
+      font-size: inherit;
+      color: var(--text);
+    }
+    button {
+      background: transparent;
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      padding: 5px 12px;
+      cursor: pointer;
+      font-family: var(--font-body);
+      font-size: 0.8125rem;
+      letter-spacing: 0.04em;
+      transition: border-color .12s, color .12s;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    input[type="text"], input[type="search"], input[type="number"], input[type="email"] {
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid var(--rule);
+      border-radius: 0;
+      padding: 6px 0;
+    }
+    input[type="text"]:focus, input[type="search"]:focus,
+    input[type="number"]:focus, input[type="email"]:focus {
+      outline: none;
+      border-bottom-color: var(--accent);
+    }
+
+    select {
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid var(--rule);
+      border-radius: 0;
+      padding: 6px 22px 6px 0;
+      appearance: none;
+      cursor: pointer;
+      background-image:
+        linear-gradient(45deg, transparent 50%, var(--muted) 50%),
+        linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+      background-position: calc(100% - 11px) 55%, calc(100% - 6px) 55%;
+      background-size: 5px 5px, 5px 5px;
+      background-repeat: no-repeat;
+    }
+    select:focus { outline: none; border-bottom-color: var(--accent); }
+
+    input[type="checkbox"] {
+      appearance: none;
+      width: 14px; height: 14px;
+      border: 1px solid var(--rule);
+      background: transparent;
+      cursor: pointer;
+      vertical-align: middle;
+      position: relative;
+    }
+    input[type="checkbox"]:checked {
+      border-color: var(--accent);
+      background: var(--accent);
+    }
+    input[type="checkbox"]:checked::after {
+      content: "";
+      position: absolute;
+      left: 3px; top: 0px;
+      width: 4px; height: 8px;
+      border: solid #0e0e16;
+      border-width: 0 2px 2px 0;
+      transform: rotate(45deg);
+    }
+
+    ::selection { background: var(--accent); color: #fff; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(148,163,184,0.18); border: 2px solid var(--bg); }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(148,163,184,0.32); }
+
+    /* B1: chunk card expand + compose bar */
+    .card.is-current { box-shadow: inset 3px 0 0 var(--accent); }
+    mark { background: rgba(147,51,234,0.25); color: var(--text); padding: 0 2px; }
+    #compose-bar {
+      position: fixed; bottom: 0; left: 0; right: 0; z-index: 250;
+      background: var(--surface); border-top: 1px solid var(--accent);
+      padding: 10px 32px; display: none; align-items: center; gap: 16px;
+    }
+    #compose-bar.visible { display: flex; }
+    .card { transition: max-height .15s; }
+    .card-body { max-height: 4.5em; overflow: hidden; }
+    .card.expanded .card-body { max-height: none; }
+
+    /* B3: status pill in nav */
+    .nav-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-family: var(--font-mono);
+      font-size: 0.625rem;
+      font-weight: 500;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      padding: 2px 8px;
+      border: 1px solid var(--rule);
+      border-radius: 0;
+      background: transparent;
+      cursor: pointer;
+      transition: border-color .12s, color .12s;
+      text-decoration: none;
+    }
+    .nav-pill:hover { border-color: var(--accent); color: var(--text); border-bottom-color: var(--accent); }
+    .nav-pill .pill-dot {
+      display: inline-block; width: 5px; height: 5px;
+      border-radius: 50%; background: var(--muted);
+    }
+    .nav-pill.pill-idle .pill-dot { background: var(--teal); }
+    .nav-pill.pill-running .pill-dot { background: var(--accent); }
+    .nav-pill.pill-error .pill-dot { background: var(--danger); }
+
+    /* B3: Version badge in nav */
+    .nav-version {
+      font-family: var(--font-mono);
+      font-size: 0.5625rem;
+      color: var(--label);
+      letter-spacing: 0.06em;
+      border: 1px solid var(--rule);
+      padding: 1px 5px;
+      background: transparent;
+    }
+  </style>
+</head>
+<body>
+  <nav>
+    <span class="brand">biss-brain</span>
+    {% if plugin_version is defined and plugin_version %}<span class="nav-version">v{{ plugin_version }}</span>{% endif %}
+    <form method="get" action="/" style="display:contents">
+      <select name="project" onchange="this.form.submit()" title="Switch project">
+        <option value="">— pick project —</option>
+        {% for p in projects %}
+        <option value="{{ p.hash }}"
+          {% if p.hash == current_project %}selected{% endif %}>
+          {{ p.path.split('/')[-1] if p.path else p.hash }}
+          ({{ p.chunk_count }})
+        </option>
+        {% endfor %}
+      </select>
+    </form>
+    {% if current_project %}
+    <a href="/status?project={{ current_project }}" class="nav-pill" id="status-pill" title="Brain status">
+      <span class="pill-dot"></span><span id="status-pill-text">—</span>
+    </a>
+    {% endif %}
+    <div class="nav-links">
+      <a href="/search{% if current_project %}?project={{ current_project }}{% endif %}">Search</a>
+      <a href="/sessions{% if current_project %}?project={{ current_project }}{% endif %}">Sessions</a>
+      <a href="/timeline{% if current_project %}?project={{ current_project }}{% endif %}">Timeline</a>
+      <a href="/scatter{% if current_project %}?project={{ current_project }}{% endif %}">Scatter</a>
+      <a href="/graph{% if current_project %}?project={{ current_project }}{% endif %}">Graph</a>
+      <a href="/status{% if current_project %}?project={{ current_project }}{% endif %}">Status</a>
+    </div>
+  </nav>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <div id="compose-bar">
+    <span class="count">0 selected</span>
+    <button id="compose-go">Compose &rarr;</button>
+  </div>
+  {% if current_project %}
+  <script>
+  (function() {
+    var PROJECT = {{ current_project | tojson }};
+    var pill = document.getElementById('status-pill');
+    var pillText = document.getElementById('status-pill-text');
+    if (!pill || !pillText) return;
+
+    function updatePill() {
+      fetch('/api/status.json?project=' + encodeURIComponent(PROJECT))
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          var stage = d.dream_stage || '—';
+          var depth = d.edge_queue_depth != null ? d.edge_queue_depth : '?';
+          var cliFails = d.cli_failures_24h || 0;
+          var label = stage + ' · ' + depth;
+          if (cliFails > 0) label += ' · CLI×' + cliFails;
+          pillText.textContent = label;
+          pill.className = 'nav-pill';
+          if (cliFails > 0 || d.dream_error) pill.classList.add('pill-error');
+          else if (stage === 'IDLE' || stage === '—') pill.classList.add('pill-idle');
+          else pill.classList.add('pill-running');
+        })
+        .catch(function() { pillText.textContent = '—'; });
+    }
+
+    updatePill();
+    setInterval(updatePill, 30000);
+  })();
+  </script>
+  {% endif %}
+  {% block scripts %}
+  <script src="/static/shortcuts.js" defer></script>
+  {% endblock %}
+</body>
+</html>

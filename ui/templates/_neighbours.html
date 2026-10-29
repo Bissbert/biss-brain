@@ -1,0 +1,25 @@
+{% if neighbours %}
+<div style="margin-top:10px;border-left:2px solid var(--rule-strong);padding-left:24px;">
+  <div style="font-family:var(--font-body);font-size:0.6875rem;letter-spacing:0.10em;text-transform:uppercase;color:var(--label);margin-bottom:6px;">
+    neighbours ({{ neighbours | length }})
+  </div>
+  {% for nbr in neighbours %}
+  <div style="padding:4px 0;border-top:1px solid var(--rule);display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+    <code style="font-size:0.6875rem;color:var(--muted);flex-shrink:0;" title="{{ nbr.id }}">{{ nbr.id[:12] }}</code>
+    <span class="badge" style="font-size:0.625rem;padding:1px 5px;">{{ nbr.kind }}</span>
+    {% if nbr.score is not none %}
+    <span style="font-family:var(--font-mono);font-size:0.625rem;color:var(--label);flex-shrink:0;">
+      {{ "%.3f"|format(nbr.score) }}
+    </span>
+    {% endif %}
+    <span style="font-size:0.8125rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:600px;">
+      {{ nbr.text[:80] | e }}{% if nbr.text | length > 80 %}…{% endif %}
+    </span>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div style="margin-top:10px;padding-left:24px;font-size:0.8125rem;color:var(--label);">
+  no neighbours found
+</div>
+{% endif %}

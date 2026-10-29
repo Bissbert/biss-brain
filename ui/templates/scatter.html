@@ -1,0 +1,386 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .scatter-header {
+    display:flex; align-items:flex-end; gap:18px; flex-wrap:wrap; margin-bottom:18px;
+    padding-bottom:14px; border-bottom:1px solid var(--rule);
+  }
+  .scatter-header h1 { margin:0; }
+  .scatter-meta {
+    font-family:var(--font-mono); font-feature-settings:'tnum';
+    font-size:0.8125rem; color:var(--muted);
+  }
+  .btn-recompute { margin-left:auto; }
+
+  .filter-bar {
+    display:flex; gap:24px; align-items:center; flex-wrap:wrap; margin-bottom:24px;
+    padding-bottom:14px; border-bottom:1px solid var(--rule);
+  }
+  .filter-bar > .label-inline {
+    font-size:0.6875rem; font-weight:500; letter-spacing:0.12em;
+    text-transform:uppercase; color:var(--label);
+  }
+  .filter-bar label.toggle {
+    display:flex; align-items:center; gap:8px;
+    font-size:0.75rem; font-weight:500; letter-spacing:0.10em;
+    text-transform:uppercase; color:var(--muted);
+  }
+  .chip-group { display:flex; gap:14px; flex-wrap:wrap; }
+  .chip {
+    display:inline-block; font-size:0.75rem; font-weight:500; letter-spacing:0.06em;
+    padding:3px 0; color:var(--muted); cursor:pointer;
+    border-bottom:1px solid transparent; user-select:none;
+  }
+  .chip:hover { color:var(--text); border-bottom-color:var(--rule); }
+  .chip.active { color:var(--text); border-bottom-color:var(--accent); }
+
+  .scatter-layout { display:flex; gap:32px; align-items:flex-start; }
+  .canvas-wrap { flex:1; min-width:0; padding:0; overflow:auto; }
+  #scatter-canvas { min-height:200px; }
+  .loading-msg, .empty-state { color:var(--muted); padding:60px 0; text-align:center; }
+  .stale-badge {
+    display:inline-block; font-size:0.6875rem; letter-spacing:0.10em;
+    text-transform:uppercase; color:var(--danger); margin-left:8px;
+  }
+
+  aside#detail {
+    width:300px; flex-shrink:0; padding:0 0 0 24px;
+    border-left:1px solid var(--rule); font-size:0.8125rem;
+    max-height:680px; overflow-y:auto;
+  }
+  aside#detail h3 { font-size:0.875rem; margin-bottom:14px; color:var(--text); }
+  aside#detail .detail-empty { color:var(--muted); }
+  aside#detail .detail-row { display:flex; gap:12px; margin-bottom:6px; flex-wrap:wrap; align-items:baseline; }
+  aside#detail .detail-label {
+    font-size:0.6875rem; letter-spacing:0.10em; text-transform:uppercase;
+    color:var(--label); min-width:72px;
+  }
+  aside#detail .detail-value {
+    font-family:var(--font-mono); font-feature-settings:'tnum';
+    color:var(--text); word-break:break-all;
+  }
+  aside#detail pre {
+    background:transparent; border:none; border-top:1px solid var(--rule);
+    padding:10px 0 0; font-family:var(--font-mono); font-size:0.75rem;
+    white-space:pre-wrap; word-break:break-word;
+    max-height:300px; overflow-y:auto; margin-top:14px; color:var(--muted);
+  }
+</style>
+
+<div class="scatter-header">
+  <div>
+    <div class="label" style="margin-bottom:4px;">Embedding map</div>
+    <h1>Scatter</h1>
+  </div>
+  <span class="scatter-meta" id="scatter-meta">Loading…</span>
+  <button class="btn-recompute" id="btn-recompute" onclick="triggerRecompute()">Recompute</button>
+</div>
+
+<div class="filter-bar">
+  <span class="label-inline">Kind</span>
+  <div class="chip-group" id="kind-chips"></div>
+  <label class="toggle" style="margin-left:24px;">
+    <input type="checkbox" id="filter-pinned" onchange="applyFilters()">
+    Pinned only
+  </label>
+  <label class="toggle">
+    <input type="checkbox" id="filter-superseded" onchange="applyFilters()">
+    Include superseded
+  </label>
+  <div class="field" style="margin-left:auto;display:flex;flex-direction:column;gap:6px;">
+    <span class="label">Colour by</span>
+    <select id="colour-by" onchange="applyFilters()">
+      <option value="kind">kind</option>
+      <option value="salience">salience</option>
+      <option value="consolidation_round">round</option>
+      <option value="decay_score">decay</option>
+      <option value="retrieval_count">retrieval count</option>
+    </select>
+  </div>
+</div>
+
+<div class="scatter-layout">
+  <div class="canvas-wrap">
+    <div id="scatter-canvas"><div class="loading-msg">Fetching projection…</div></div>
+  </div>
+  <aside id="detail">
+    <h3>Chunk detail</h3>
+    <div class="detail-empty">Click a point to inspect.</div>
+  </aside>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/d3@7" defer></script>
+<script src="https://cdn.jsdelivr.net/npm/@observablehq/plot@0.6/dist/plot.umd.min.js" defer></script>
+<script>
+(function () {
+  var PROJECT = {{ current_project | tojson }};
+  var allPoints = [];
+  var currentBbox = null;
+  var computedTs = null;
+  var isStale = false;
+
+  var TEXT = "#e2e8f0", MUTED = "#94a3b8", RULE = "rgba(148,163,184,0.18)";
+
+  function fetchProjection(force) {
+    var url = "/api/scatter.json?project=" + encodeURIComponent(PROJECT);
+    if (force) url += "&force=1";
+    setMeta("Loading…");
+    document.getElementById("btn-recompute").disabled = true;
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        allPoints = data.points || [];
+        currentBbox = data.bbox || null;
+        computedTs = data.computed_ts || null;
+        isStale = !!data.stale;
+
+        if (allPoints.length === 0) {
+          renderEmpty(data.reason || "No data available");
+          setMeta("0 chunks");
+        } else {
+          buildKindChips();
+          applyFilters();
+          var ts = computedTs ? new Date(computedTs * 1000).toISOString().slice(0, 16).replace("T", " ") : "unknown";
+          setMeta(
+            allPoints.length + " chunks" +
+            (isStale ? ' <span class="stale-badge">stale</span>' : "") +
+            " · computed " + ts + " UTC"
+          );
+        }
+        document.getElementById("btn-recompute").disabled = false;
+      })
+      .catch(function (err) {
+        renderEmpty("Failed to load projection: " + err.message);
+        document.getElementById("btn-recompute").disabled = false;
+        setMeta("Error");
+      });
+  }
+
+  function buildKindChips() {
+    var kinds = Array.from(new Set(allPoints.map(function (p) { return p.kind; }))).sort();
+    var container = document.getElementById("kind-chips");
+    container.innerHTML = "";
+    var all = document.createElement("span");
+    all.className = "chip active";
+    all.textContent = "all";
+    all.dataset.kind = "__all__";
+    all.onclick = function () { toggleKind("__all__"); };
+    container.appendChild(all);
+    kinds.forEach(function (k) {
+      var chip = document.createElement("span");
+      chip.className = "chip active";
+      chip.textContent = k;
+      chip.dataset.kind = k;
+      chip.onclick = function () { toggleKind(k); };
+      container.appendChild(chip);
+    });
+  }
+
+  function toggleKind(kind) {
+    if (kind === "__all__") {
+      var chips = document.querySelectorAll("#kind-chips .chip");
+      var anyOff = Array.from(chips).some(function (c) { return !c.classList.contains("active"); });
+      chips.forEach(function (c) { c.classList.toggle("active", anyOff); });
+    } else {
+      var chip = document.querySelector('#kind-chips .chip[data-kind="' + kind + '"]');
+      if (chip) chip.classList.toggle("active");
+      var allChip = document.querySelector('#kind-chips .chip[data-kind="__all__"]');
+      if (allChip) {
+        var nonAllChips = document.querySelectorAll('#kind-chips .chip:not([data-kind="__all__"])');
+        var allActive = Array.from(nonAllChips).every(function (c) { return c.classList.contains("active"); });
+        allChip.classList.toggle("active", allActive);
+      }
+    }
+    applyFilters();
+  }
+
+  // Expose to inline handlers (script body is an IIFE).
+  window.applyFilters = function () { applyFilters(); };
+
+  function applyFilters() {
+    var pinnedOnly = document.getElementById("filter-pinned").checked;
+    var includeSuperseded = document.getElementById("filter-superseded").checked;
+    var activeKinds = new Set(
+      Array.from(document.querySelectorAll("#kind-chips .chip.active"))
+        .map(function (c) { return c.dataset.kind; })
+        .filter(function (k) { return k !== "__all__"; })
+    );
+
+    var filtered = allPoints.filter(function (p) {
+      if (!includeSuperseded && p.superseded) return false;
+      if (pinnedOnly && !p.pinned) return false;
+      if (activeKinds.size > 0 && !activeKinds.has(p.kind)) return false;
+      return true;
+    });
+
+    renderPlot(filtered);
+  }
+
+  // Numeric colour fields
+  var NUMERIC_FIELDS = ["salience", "consolidation_round", "decay_score", "retrieval_count"];
+
+  function getColourByValue() {
+    var sel = document.getElementById("colour-by");
+    return sel ? sel.value : "kind";
+  }
+
+  function renderPlot(points) {
+    var container = document.getElementById("scatter-canvas");
+    container.innerHTML = "";
+
+    if (points.length === 0) {
+      container.innerHTML = '<div class="empty-state">No points match the current filters.</div>';
+      return;
+    }
+
+    var wrap = container.closest(".canvas-wrap");
+    var plotWidth = wrap ? Math.max(500, wrap.clientWidth - 8) : 900;
+    var colourBy = getColourByValue();
+    var isNumeric = NUMERIC_FIELDS.indexOf(colourBy) !== -1;
+
+    var colorSpec;
+    if (isNumeric) {
+      // Continuous gradient for numeric fields
+      colorSpec = {
+        legend: true,
+        scheme: "viridis",
+        type: "linear"
+      };
+    } else {
+      // Discrete scheme for kind
+      colorSpec = {
+        legend: true,
+        scheme: "tableau10",
+        domain: ["stop", "subagent_stop", "pre_compact", "decision", "note"]
+      };
+    }
+
+    var plot = window.Plot.plot({
+      width: plotWidth,
+      height: 600,
+      style: { background: "transparent", color: TEXT, fontFamily: "Hanken Grotesk, sans-serif" },
+      color: colorSpec,
+      marks: [
+        window.Plot.dot(points, {
+          x: "x",
+          y: "y",
+          fill: colourBy,
+          r: function (d) { return 3 + (d.decay_score || 0) * 5; },
+          opacity: function (d) { return d.superseded ? 0.25 : 0.9; },
+          stroke: function (d) { return d.pinned ? "#2dd4bf" : "none"; },
+          strokeWidth: 1.5,
+          title: function (d) {
+            return d.kind + "\n" +
+              new Date(d.ts * 1000).toISOString().slice(0, 16).replace("T", " ") + "\n" +
+              colourBy + ": " + (d[colourBy] != null ? d[colourBy] : "—");
+          },
+          channels: { id: "id" }
+        })
+      ]
+    });
+
+    plot.addEventListener("click", function (evt) {
+      var el = evt.target;
+      var d = el.__data__;
+      if (!d || !d.id) return;
+      fetchChunkDetail(d.id);
+    });
+
+    container.appendChild(plot);
+  }
+
+  function renderEmpty(reason) {
+    var container = document.getElementById("scatter-canvas");
+    container.innerHTML =
+      '<div class="empty-state"><strong>' + escapeHtml(reason) + '</strong><br>' +
+      '<span style="font-size:0.8125rem;color:var(--muted)">Run a few sessions to populate this view.</span></div>';
+  }
+
+  function fetchChunkDetail(chunkId) {
+    var url = "/chunk/" + encodeURIComponent(chunkId) + "?project=" + encodeURIComponent(PROJECT);
+    fetch(url)
+      .then(function (r) { return r.json(); })
+      .then(function (data) { renderDetail(data); })
+      .catch(function (err) { renderDetailError("Failed to load chunk: " + err.message); });
+  }
+
+  function renderDetail(data) {
+    var aside = document.getElementById("detail");
+    var ts = data.ts
+      ? new Date(data.ts * 1000).toISOString().slice(0, 16).replace("T", " ") + " UTC"
+      : "unknown";
+    var rows = [
+      ["id", data.id ? data.id.slice(0, 12) + "…" : ""],
+      ["kind", data.kind || ""],
+      ["time", ts],
+      ["pinned", data.pinned ? "yes" : "no"],
+      ["decay", data.decay_score != null ? Number(data.decay_score).toFixed(3) : ""],
+      ["session", data.session_id ? data.session_id.slice(0, 12) : ""],
+      ["superseded", data.superseded_by ? "yes" : "no"],
+    ];
+
+    var html = "<h3>Chunk detail</h3>";
+    rows.forEach(function (pair) {
+      html +=
+        '<div class="detail-row">' +
+        '<span class="detail-label">' + escapeHtml(pair[0]) + "</span>" +
+        '<span class="detail-value">' + escapeHtml(String(pair[1])) + "</span>" +
+        "</div>";
+    });
+
+    aside.innerHTML = html;
+  }
+
+  function renderDetailError(msg) {
+    var aside = document.getElementById("detail");
+    aside.innerHTML = "<h3>Chunk detail</h3><div class=\"detail-empty\">" + escapeHtml(msg) + "</div>";
+  }
+
+  window.triggerRecompute = function () {
+    document.getElementById("btn-recompute").disabled = true;
+    setMeta("Recomputing…");
+    var url = "/api/scatter/recompute?project=" + encodeURIComponent(PROJECT);
+    fetch(url, { method: "POST" })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        allPoints = data.points || [];
+        currentBbox = data.bbox || null;
+        computedTs = data.computed_ts || null;
+        isStale = false;
+        if (allPoints.length === 0) {
+          renderEmpty(data.reason || "No data available");
+          setMeta("0 chunks");
+        } else {
+          buildKindChips();
+          applyFilters();
+          var ts = computedTs ? new Date(computedTs * 1000).toISOString().slice(0, 16).replace("T", " ") : "unknown";
+          setMeta(allPoints.length + " chunks · computed " + ts + " UTC");
+        }
+        document.getElementById("btn-recompute").disabled = false;
+      })
+      .catch(function (err) {
+        setMeta("Recompute failed: " + err.message);
+        document.getElementById("btn-recompute").disabled = false;
+      });
+  };
+
+  function setMeta(html) { document.getElementById("scatter-meta").innerHTML = html; }
+  function escapeHtml(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  function waitForPlot(cb) {
+    if (window.Plot) { cb(); return; }
+    var waited = 0;
+    var t = setInterval(function () {
+      waited += 100;
+      if (window.Plot) { clearInterval(t); cb(); }
+      else if (waited > 10000) { clearInterval(t); renderEmpty("Failed to load Observable Plot library."); }
+    }, 100);
+  }
+
+  waitForPlot(function () { fetchProjection(false); });
+})();
+</script>
+{% endblock %}

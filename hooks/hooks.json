@@ -1,0 +1,89 @@
+{
+  "description": "Capture segment boundaries on Stop / SubagentStop / PreCompact / SessionEnd (PreCompact also writes a conversation-tail digest and returns at once), inject context on SessionStart (incl. compact source) / UserPromptSubmit",
+  "hooks": {
+    "Stop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" ] || exit 0; exec \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/capture.py\" stop",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" ] || exit 0; exec \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/capture.py\" subagent_stop",
+            "async": true,
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "auto|manual",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" ] || exit 0; exec \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/capture.py\" pre_compact --immediate",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" ] || exit 0; exec \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/capture.py\" session_end",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" ] || exit 0; exec \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/inject_context.py\" session_start",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" ] || exit 0; exec \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/inject_context.py\" post_compact",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" ] || exit 0; exec \"${CLAUDE_PLUGIN_ROOT}/scripts/_run.sh\" \"${CLAUDE_PLUGIN_ROOT}/scripts/inject_context.py\" user_prompt_submit",
+            "async": false,
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
