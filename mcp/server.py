@@ -150,6 +150,7 @@ def search_memory(
         global_hits = _recall_global(qvec, _cfg)
         # Exclude any IDs already in local results
         local_ids = {r["id"] for r in local_results}
+        cosine = {r["id"]: r.get("_cosine", 0.0) for r in global_hits}
         for r in global_hits:
             if r["id"] not in local_ids:
                 cross_results.append(
@@ -176,12 +177,13 @@ def search_memory(
             meta_cl = open_meta(cwd)
             try:
                 for local_chunk in local_results:
-                    for hit in global_hits[:cross_links_limit]:
+                    for hit in cross_results[:cross_links_limit]:
                         _write_cross_link(
                             meta_cl,
                             local_chunk["id"],
                             hit["id"],
-                            weight=hit.get("_cosine", 0.0),
+                            weight=cosine.get(hit["id"], 0.0),
+                            project=proj,
                         )
                 meta_cl.commit()
             finally:

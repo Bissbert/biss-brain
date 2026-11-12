@@ -7,6 +7,8 @@ POST /api/pin             – toggle pinned=1 for a chunk
 POST /api/unpin           – toggle pinned=0 for a chunk
 POST /api/forget          – soft-delete: set superseded_by to a tombstone uuid
 POST /api/unforget        – undo a forget (clears a tombstone, never a replacement)
+POST /api/share           – share a memory with every project now (globalpool.share)
+POST /api/unshare         – take it back; pinned/scope put back as they were
 GET  /api/neighbours      – semantic neighbours for a chunk (B1, F-011)
 POST /api/compose         – compose selected chunk ids into markdown (B1, F-015)
 
@@ -46,9 +48,10 @@ for _p in (_ROOT, _SCRIPTS):
     if _ps not in sys.path:
         sys.path.insert(0, _ps)
 
+import globalpool  # noqa: E402
 import lance_filter as F  # noqa: E402
 import provenance  # noqa: E402
-from common import tombstone_id  # noqa: E402
+from common import GLOBAL_PROJECT_HASH, load_config, tombstone_id  # noqa: E402
 from ui.data import (  # noqa: E402
     fetch_chunk_texts,
     fetch_chunk_v05,
@@ -79,6 +82,8 @@ def _fmt_ts(ts: int | None) -> str:
 
 
 templates.env.filters["fmt_ts"] = _fmt_ts
+templates.env.globals["pool_hash"] = GLOBAL_PROJECT_HASH
+templates.env.globals["never_pooled"] = globalpool.NEVER_POOLED
 
 router = APIRouter()
 
@@ -556,6 +561,7 @@ def load_cards(project: str, ids: list[str]) -> list[dict]:
         ).fetchall()}
         v05_map = fetch_chunk_v05(conn, list(rows))
         lineage = fetch_lineage(conn, list(rows))
+        prov = _meta_by_ids(conn, list(rows))
     finally:
         conn.close()
 
@@ -578,6 +584,8 @@ def load_cards(project: str, ids: list[str]) -> list[dict]:
             "retrieval_count": row[7],
             "score": None,
             "is_superseded": bool(row[4]),
+            "source": provenance.label(provenance.from_row(
+                prov[cid].get("source"), prov[cid].get("trust"), prov[cid].get("taint"))),
         }
         _enrich_with_v05(chunk, v05_map)
         chunk.update(lineage.get(cid, {}))
@@ -626,6 +634,64 @@ def _mirror_superseded(project: str, chunk_id: str, value: str) -> None:
         pass
 
 
+def _retract_shared(project: str, chunk_id: str) -> None:
+    """A forgotten memory leaves the shared pool at once (best effort; the
+    nightly reconcile catches anything missed)."""
+    try:
+        import globalpool  # noqa: PLC0415
+        globalpool.retract_sources(project, [chunk_id])
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# POST /api/share, /api/unshare
+# ---------------------------------------------------------------------------
+
+# what the card says when a share did not happen
+SHARE_REFUSED = {
+    "secret": "Not shared: it looks like it holds a secret, so it stays in this project.",
+    "untrusted": "Not shared: it came from web or tool output.",
+    "kind": "Not shared: this kind of memory stays in its project.",
+    "missing": "Not shared: it is no longer a live memory.",
+}
+
+
+@router.post("/api/share")
+async def api_share(
+    request: Request,
+    project: str = Query(...),
+    id: str = Query(...),
+) -> HTMLResponse:
+    """Share one memory with every project now; the card offers Undo."""
+    validate_project(project)
+    if project == GLOBAL_PROJECT_HASH:
+        raise HTTPException(status_code=400, detail="the pool is shared already")
+    status, prior = globalpool.share(project, id, load_config())
+    if status in ("shared", "saved"):
+        return _card_response(request, project, id, just_shared=status, prior=prior)
+    return _card_response(request, project, id,
+                          share_refused=SHARE_REFUSED.get(status, f"Not shared: {status}."))
+
+
+@router.post("/api/unshare")
+async def api_unshare(
+    request: Request,
+    project: str = Query(...),
+    id: str = Query(...),
+    pinned: int | None = Query(None, ge=0, le=1),
+    scope: str = Query("", pattern="^(|project|general)$"),
+) -> HTMLResponse:
+    """Take a memory out of the pool, keep it here. With pinned and scope
+    (the Undo of a share) they are put back as they were before sharing."""
+    validate_project(project)
+    if project == GLOBAL_PROJECT_HASH:
+        raise HTTPException(status_code=400, detail="use /api/pool/unshare for a pool row")
+    prior = {"pinned": pinned, "scope": scope} if pinned is not None and scope else None
+    globalpool.unshare(project, id, prior)
+    return _card_response(request, project, id, just_unshared=prior is None)
+
+
 # ---------------------------------------------------------------------------
 # POST /api/forget, /api/unforget
 # ---------------------------------------------------------------------------
@@ -651,6 +717,7 @@ async def api_forget(
         conn.close()
     if cur.rowcount:
         _mirror_superseded(project, id, tomb)
+        _retract_shared(project, id)
     return _card_response(request, project, id, just_forgotten=bool(cur.rowcount))
 
 

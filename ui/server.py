@@ -87,13 +87,14 @@ templates.env.globals["plugin_version"] = _plugin_version
 # ---------------------------------------------------------------------------
 # Panel routers – each agent owns its own file; no conflicts during parallel work
 # ---------------------------------------------------------------------------
-from ui.routers import review, search, sessions, timeline, status  # noqa: E402
+from ui.routers import pool, review, search, sessions, timeline, status  # noqa: E402
 
 app.include_router(search.router)
 app.include_router(sessions.router)
 app.include_router(timeline.router)
 app.include_router(status.router)
 app.include_router(review.router)
+app.include_router(pool.router)
 
 # ---------------------------------------------------------------------------
 # Error handlers

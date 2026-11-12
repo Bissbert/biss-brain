@@ -316,9 +316,10 @@ def split_output(
     """Split a distiller reply into trust groups, plus the salience of each group.
 
     The reply is the JSON the distill prompts ask for:
-    {"bullets": [{"source", "section"?, "text", "salience"}]}. A bullet's source
+    {"bullets": [{"source", "section"?, "text", "salience", "scope"?}]}. A bullet's source
     is honoured only if it was present in the segment; otherwise it takes the
-    floor (split_summary). Sections become headings, contiguous per group. A
+    floor (split_summary). A trusted bullet with scope "general" goes to a
+    third group, "general" (present only when it has lines). Sections become headings, contiguous per group. A
     group's salience is its highest bullet salience (at most LOW_SALIENCE_CAP
     for the low group).
 
@@ -342,7 +343,7 @@ def split_output(
         return None if strict else (groups, {})
 
     present, floor = _present_and_floor(present)
-    by_group: dict[str, dict[str, list[tuple[str, str]]]] = {"trusted": {}, "low": {}}
+    by_group: dict[str, dict[str, list[tuple[str, str]]]] = {"trusted": {}, "low": {}, "general": {}}
     salience: dict[str, int] = {}
     for b in bullets:
         if not isinstance(b, dict):
@@ -353,11 +354,17 @@ def split_output(
         src = SOURCE_OF_TAG.get(str(b.get("source") or "").strip().lower())
         src = src if src in present else floor
         g = "trusted" if src in TRUSTED else "low"
+        # a first-party fact that holds in any project gets its own chunk;
+        # tool/web facts stay low whatever they claim (never promoted)
+        if g == "trusted" and str(b.get("scope") or "").strip().lower() == "general":
+            g = "general"
         section = " ".join(str(b.get("section") or "").split())
         by_group[g].setdefault(section, []).append((src, f"- {body}"))
         sal = _salience(b.get("salience"))
         if sal is not None:
             salience[g] = max(salience.get(g, 0), min(sal, LOW_SALIENCE_CAP) if g == "low" else sal)
+    if by_group["general"]:
+        groups["general"] = []
     for g, sections in by_group.items():
         for section, lines in sections.items():
             if section:

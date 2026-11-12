@@ -206,3 +206,23 @@ def test_synthetic_suite_runs_with_fake_embeddings(tmp_path):
     assert res["coverage"] == {"answerable": 26, "in_corpus": 26, "missing": []}
     # results carry ids and numbers only, never memory text
     assert all("text" not in pq for r in res["runs"].values() for pq in r["per_question"].values())
+
+
+def test_cross_project_suite_runs_with_fake_embeddings(tmp_path):
+    out = tmp_path / "xp.json"
+    env = {k: v for k, v in os.environ.items() if k not in ("BISS_BRAIN_ROOT", "BISS_BRAIN_CONFIG")}
+    p = subprocess.run(
+        [sys.executable, str(REPO / "scripts" / "eval" / "run_eval.py"), "--suite", "synthetic",
+         "--cross-project", "--embed", "fake", "--out", str(out)],
+        env=env, capture_output=True, text=True, timeout=300,
+    )
+    assert p.returncode == 0, p.stderr[-2000:]
+    s = json.loads(out.read_text())["summary"]
+    pr = s["promotion"]
+    # every planted identifier is kept local, every general fact is pooled
+    assert pr["general_pooled"] == "16/16" and set(pr["vetoed"]) >= {"secret", "path", "email", "address", "url"}
+    leak = s["leak"]
+    assert leak["veto_escapes"] == [] and leak["project_facts_in_pool"] == []
+    assert leak["recall_leak_veto"] == leak["recall_leak_local"] == leak["poison_injected"] == 0
+    assert s["benefit"]["n"] == 16 and set(s["latency"]) >= {"global_p95_ms", "with_pool_p95_ms"}
+    assert all("text" not in pq for pq in json.loads(out.read_text())["per_question"].values())

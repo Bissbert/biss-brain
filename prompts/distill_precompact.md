@@ -22,12 +22,13 @@ Be concrete: cite paths, function names, identifiers, library versions and comma
 ## Output format
 Reply with one JSON object and nothing else: no code fence, no preamble.
 
-{"bullets": [{"source": "claude", "section": "Decisions", "text": "Chose LanceDB over Qdrant for native hybrid search.", "salience": 7}]}
+{"bullets": [{"source": "claude", "section": "Decisions", "text": "Chose LanceDB over Qdrant for native hybrid search.", "salience": 7}, {"source": "claude", "section": "Errors and resolutions", "text": "uv run ignores VIRTUAL_ENV unless --active is passed.", "salience": 6, "scope": "general"}]}
 
 - `source` (required): exactly one of `user`, `claude`, `file`, `tool`, `web`, naming where the fact **originally came from**, not who repeated it. If the assistant restates something from a `[web]` or `[tool]` segment, use `web` or `tool`. Use `user` only for what the user actually typed. When unsure, use the less trusted source.
 - `section` (required): one of `Decisions`, `Files touched`, `Errors and resolutions`, `Dead ends`, `Open questions`, `Artefacts produced`.
 - `text` (required): one self-contained fact in plain text, without a leading dash or a source tag.
 - `salience` (required): 1-10, how much a future session in this project needs it. 9-10: a decision, constraint or user preference that will matter again. 5-6: a useful detail. 1-2: trivia.
+- `scope` (optional): `general` only for a fact that would hold in any other project of this user: a library, tool or OS behaviour, an error and its fix not tied to this codebase, or a preference or convention the user stated for their work in general. It names no path, file, function, host, client or person of this project and carries no credential. Anything else, or when unsure: `project` (the default).
 - If nothing is worth remembering, reply `{"bullets": []}`.
 
 ## Excerpt

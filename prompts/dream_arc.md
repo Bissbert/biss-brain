@@ -15,5 +15,7 @@ Rules:
 - Drop anything that is pure narration ("we explored", "we looked at"). Keep the conclusions.
 - If the session has no clear outcome, say so in one bullet.
 
+After the bullets you may add 0-3 portable lessons, each on its own line starting with `LESSON: `. A portable lesson holds in any other project of this user: a library, tool or OS behaviour, an error and its fix not tied to this codebase, or a working convention the user stated. It names no path, file, function, host, client or person of this session and carries no credential. Most sessions have none; then write no LESSON line.
+
 Source log:
 {text}

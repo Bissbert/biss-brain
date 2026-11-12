@@ -27,6 +27,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "scope": {
         "exclude": ["~", "~/Downloads", "~/Library", "~/.claude", "/tmp"],
         "include_only": [],
+        # folders that hold projects rather than being one: a directory
+        # outside git never joins a project at or above these (repo_root)
+        "generic_roots": ["~/Documents", "~/Desktop", "~/Downloads", "~/Developer", "~/sources",
+                          "~/src", "~/projects", "~/code", "~/dev", "~/repos", "~/work", "~/git"],
     },
     "distill": {
         "backend": "claude_code",
@@ -183,16 +187,41 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "idle_seconds_before_run": 300,
         "max_runtime_seconds": 60,
     },
-    # cross_project.enabled is PERMANENT default-off (product decision)
     "cross_project": {
-        "enabled": False,
+        # the shared pool: dream copies vetted general facts into `_global`,
+        # recall and MCP list pool hits beside local ones. On since the
+        # cross-project eval found no veto escape and no vetoed or project-tagged
+        # fact recalled elsewhere; one mistagged fact was listed, never injected
+        # (docs/internals.md, "Shared pool"); the prompt inject stays off
+        "enabled": True,
+        # the arc distiller may add up to three portable LESSON lines per
+        # session; each becomes a kind=lesson, scope=general chunk
+        "arc_lessons": True,
+        # what dream copies to the pool: "scope" (facts tagged general that
+        # pass the veto, plus what the user shared), "pinned_only" (only what
+        # the user shared) or "off"
+        "promote": "scope",
+        # a general fact waits this long before promotion, so the conflict
+        # sweep can replace it first
+        "promote_after_hours": 24,
+        "veto_max_chars": 400,
+        # a fact this close to one already in the pool joins it (its project
+        # is added to source_projects) instead of being copied again
+        "dedup_cosine": 0.94,
+        "cross_links": {"limit": 5},
+        # UserPromptSubmit may add one pool row (never at SessionStart: there
+        # is no query yet), only into a free inject slot and only above
+        # inject_min_cosine (stricter than recall's cosine_gate). Off by default.
+        "inject": False,
+        "inject_min_cosine": 0.88,
+        "inject_max": 1,
+        # pool rows rank below local memories of equal relevance
+        "rank_multiplier": 0.8,
         "admission": {
             "min_consolidation_round": 1,
             "eligible_kinds": ["schema", "lesson", "hypothesis"],
             "frequency": {
                 "min_retrievals": 5,
-                "distinct_projects": 3,
-                "window_days": 30,
             },
         },
         "recall": {
@@ -317,13 +346,53 @@ def _gitdir_of(dotgit: Path) -> Path | None:
     return gd if gd.is_dir() else None
 
 
+# Files that make a directory outside git look like a project. CLAUDE.md alone
+# does not count: a folder of repos often has one for all of them.
+PROJECT_MARKERS = (
+    ".claude", "README.md", "README", "package.json", "pyproject.toml", "Cargo.toml", "go.mod",
+    "pom.xml", "build.gradle", "build.gradle.kts", "Makefile", "CMakeLists.txt",
+)
+ROOT_MARKER = ".biss-brain-root"
+
+
+def _generic_roots() -> set[Path]:
+    try:
+        roots = load_config().get("scope", {}).get("generic_roots", [])
+    except (OSError, ValueError):
+        roots = DEFAULT_CONFIG["scope"]["generic_roots"]
+    return {Path(os.path.realpath(os.path.expanduser(r))) for r in roots}
+
+
+def _marked_root(real: Path, home: Path) -> Path:
+    """Project root of a directory outside git: the highest marked ancestor.
+
+    The nearest `.biss-brain-root` wins outright. Otherwise the highest
+    ancestor holding a PROJECT_MARKERS entry, never at or above $HOME or a
+    `[scope] generic_roots` folder. With no marker, the directory itself.
+    Depends only on the file system, never on which stores exist, so a
+    subfolder's key does not change when its parent gets a store.
+    """
+    stop = _generic_roots() | {home, Path("/")}
+    best = real
+    for d in (real, *real.parents):
+        if d in stop:
+            break
+        if (d / ROOT_MARKER).exists():
+            return d
+        if any((d / m).exists() for m in PROJECT_MARKERS):
+            best = d
+    return best
+
+
 def repo_root(cwd: str | os.PathLike) -> Path:
-    """Main worktree root of the repo holding cwd, without spawning git; realpath otherwise.
+    """Main worktree root of the repo holding cwd, without spawning git; else a marked parent.
 
     Walks up to the nearest `.git`. A directory is a plain clone. A file is a
     linked worktree (its git dir has `commondir`; the root is the main
     checkout) or a submodule (no `commondir`; the root is the submodule
-    itself). A bare common dir, or no repo below $HOME, keeps the realpath.
+    itself). A bare common dir keeps the realpath. With no repo below $HOME,
+    the highest marked ancestor is the root (_marked_root), so every
+    subfolder of a project outside git shares its store.
     $HOME and / are never a project root.
     """
     real = Path(os.path.realpath(str(cwd)))
@@ -346,7 +415,12 @@ def repo_root(cwd: str | os.PathLike) -> Path:
                 return d  # a submodule is its own project
             common_dir = gd.parent.parent  # <repo>/.git/worktrees/<name> without commondir
         return common_dir.parent if common_dir.name == ".git" and common_dir.is_dir() else d
-    return _normalize_worktree(real)
+    wt = _normalize_worktree(real)
+    if wt != real:
+        return wt
+    if real in (home, Path("/")) or not real.is_dir():
+        return real
+    return _marked_root(real, home)
 
 
 def plugin_version(root: str | os.PathLike) -> tuple[int, ...] | None:
@@ -498,6 +572,19 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     ):
         if col_name not in existing_cols:
             conn.execute(f"ALTER TABLE chunks ADD COLUMN {col_name} {col_def}")
+
+    # v0.10 scope: "general" marks a fact true outside this project (a tool
+    # quirk, a personal convention); dream promotes those to the global pool.
+    if "scope" not in existing_cols:
+        conn.execute("ALTER TABLE chunks ADD COLUMN scope TEXT NOT NULL DEFAULT 'project'")
+    # v0.10 pool bookkeeping (globalpool.py). On a project row: the pool row it
+    # fed (global_id) or why it stays local (global_veto). On a pool row: where
+    # its text came from and every project that wrote the same fact.
+    for col in ("global_id", "global_veto", "source_project", "source_id"):
+        if col not in existing_cols:
+            conn.execute(f"ALTER TABLE chunks ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
+    if "source_projects" not in existing_cols:
+        conn.execute("ALTER TABLE chunks ADD COLUMN source_projects TEXT NOT NULL DEFAULT '[]'")
 
     # v0.7 temporal validity (see temporal.py). valid_from NULL reads as ts.
     if "valid_from" not in existing_cols:

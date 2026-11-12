@@ -40,6 +40,8 @@ biss-brain/
 │   ├── core.py, core_cmd.py        # core memory
 │   ├── recall.py, remember.py, forget.py, stats.py   # command backends
 │   ├── dream.py                    # nightly consolidation (Stage 1 + Stage 2)
+│   ├── globalpool.py, share.py     # the shared pool: veto, reconcile, share/unshare
+│   ├── migrate_fold_stores.py      # one-off: fold stores keyed by the pre-marker rule
 │   └── dmn.py                      # optional idle-time maintenance
 ├── mcp/server.py                   # FastMCP tools
 └── ui/                             # FastAPI web UI
@@ -65,7 +67,15 @@ biss-brain/
     queue/                          # pending events drained by flush.py
     lancedb/chunks.lance/           # vector + FTS index; versions older than 10 min pruned on each write, index rebuilt nightly
     meta.sqlite                     # chunk metadata, superseded, pinned, counts
+  _global/                          # the shared pool (hash 5da0e6b1ad8a), same layout
 ```
+
+A directory outside git takes the key of its highest ancestor holding a project marker, below
+`$HOME` and any `[scope] generic_roots` folder; the nearest `.biss-brain-root` wins outright.
+Before this rule each subfolder had its own store. `scripts/migrate_fold_stores.py` folds those
+into their project's store: dry run by default, `--apply` writes a backup to
+`~/.claude/brain-backups/fold-<stamp>` first, refuses while the flush daemon runs, and re-points
+pool copies at the target.
 
 ## Operating model
 
@@ -83,7 +93,9 @@ biss-brain/
 | **1d Compact** | Rebuilds the full-text index in one piece and prunes table versions older than ten minutes. Rows do not change. | None |
 | **2a Session arcs** | Groups raw chunks by `session_id`, distills each session into a `kind='arc'` chunk at `consolidation_round=1`. Sets `parent_id` on the originals so the UI can collapse / expand. Skips sessions younger than `session_cooldown_hours`. | One Haiku call per qualifying session |
 | **2b Daily summary** | (opt-in) Rolls up arcs by calendar day into `kind='daily_summary'` at `consolidation_round=2`. | One Sonnet call per qualifying day |
-| **2c Core proposals** | Queues short, trusted, often-recalled decisions, lessons, schemas and pinned chunks as core-memory proposals. Never writes core. | None |
+| **2c Core proposals** | Queues short, trusted, often-recalled decisions, lessons, schemas and pinned chunks as core-memory proposals. Never writes core. A memory whose pool copy two or more projects wrote is left to the global pass. | None |
+| **Pool promotion** | Copies general facts (and shared ones) older than `promote_after_hours` into `_global` past the veto; a near-duplicate joins the existing row. See [Shared pool](#shared-pool). | None |
+| **Pool upkeep** | Once per dream, without `--project`: reconcile pool rows with their sources, sweep orphans, compact, then queue global-core proposals for live, trusted pool rows two or more projects wrote. | None |
 
 Retrieval can opt into "summary first" via `[dream] prefer_summaries_in_recall = true`. `inject_context.py` always prefers `arc` / `daily_summary` over raw `stop` chunks at session start, on the basis that summaries are higher-density.
 
@@ -100,6 +112,50 @@ To uninstall the dream job:
 launchctl unload ~/Library/LaunchAgents/ch.bissbert.biss-brain.dream.plist
 rm ~/Library/LaunchAgents/ch.bissbert.biss-brain.dream.plist
 ```
+
+## Shared pool
+
+Memories written in one project reach the others through one extra store, `_global`.
+
+- **Scope.** The distiller tags each fact `project` or `general`; each session arc may add up to
+  three portable lessons (`arc_lessons`). Only `general` facts are candidates.
+- **Veto.** Before a copy, `globalpool.veto` keeps a fact local if it holds a secret, a home
+  path, a mail or IP address, a URL, a project name (including the stem of a compound store
+  name), or runs past `veto_max_chars`. The reason is stored in `global_veto`. Facts tainted by
+  tool or web output, quarantined rows, hypotheses, arcs and daily summaries are never pooled.
+- **Copies.** A pool row keeps the source chunk's id and records `source_project`, `source_id`
+  and every project that wrote an equal fact (`source_projects`). Forget, supersede and
+  rewording in the source follow it to the pool on the next reconcile.
+- **Read path.** `retrieve.global_candidates` is the only reader. Pool rows need an absolute
+  cosine of `recall.cosine_gate` (0.85) and rank at `rank_multiplier` (0.8) below local rows of
+  equal relevance. `/biss-brain:recall`, `search_memory` and the UI list them after local
+  results, labelled with their origin. The prompt hook may add one pool row to a free slot above
+  `inject_min_cosine` (0.88); that is off by default (`inject = false`).
+- **Sharing by hand.** `/biss-brain:share <id>`, `remember --share` and the card's Share button
+  mark a memory pinned and general and pool it at once, checked for secrets only. They are
+  user-typed only. Unshare takes the copy out (the UI's Undo also restores the earlier pin and
+  scope) and sets `global_veto = "user"`, so
+  no dream pools it again; the Shared page's unshare does the same for every project that wrote
+  the row, and its Undo restores the row.
+- **Global core.** The dream proposes a live, trusted pool row that two or more projects wrote
+  for `_global.md`. Proposals queue under the pool's hash and appear in `/biss-brain:core` in
+  every project; nothing joins core without `accept`.
+
+### Cross-project eval
+
+`scripts/eval` builds synthetic stores (project facts with paths and names, general facts, a
+mistagged project fact, poison) and measures the pool with nomic embeddings:
+
+| Check | Result |
+|---|---|
+| Veto | 19 rows pooled: all 16 general facts and 3 mistagged project facts. 7 project facts kept local (address, email, path, 2 project-name, secret, url). No escape. |
+| Leak | 0 vetoed or project-tagged facts recalled or injected in another project; highest cosine of such a row: 0.58. Of 3 mistagged project facts that reached the pool, 1 was listed by recall (cosine 0.86), none injected. Poison 0. |
+| Regression | 0 pool rows shown or injected on 21 questions a local memory answers; pool false-inject rate 0 over 88 quiet questions. |
+| Benefit | Pool answers sit at cosine 0.62–0.86 (median 0.78), so the 0.85 gate lets 2 of 16 through (hit@1 0.125). At 0.75 it would be 11. |
+| Latency | Pool query p95 6.6 ms; retrieve p95 34 ms with the pool vs 28 ms without. |
+
+That is why the pool is on but its prompt inject is off: recall lists a pool row only when it is
+close, and the gate is the one knob to lower once tagging is trusted.
 
 ## How the daemon works
 
@@ -162,7 +218,9 @@ stays on only if it improves MRR, or costs nothing measurable. Numbers and metho
 | RIF | **off** (`[rif] enabled`) | Real suite ΔMRR −0.105, ~170 ms per read, erased nightly by decay |
 | Usage boost in decay | **off** (`[hygiene] decay_usage_boost`) | No gain on either suite |
 | Summary first, cross-encoder rerank, daily summary | opt-in | Summary first cost −0.125 on the synthetic suite; rerank and 2b not measured |
-| Conflict sweep, session arcs, global promotion | on | Not measurable on the frozen suites; your call |
+| Conflict sweep, session arcs | on | Not measurable on the frozen suites; your call |
+| Shared pool (recall) | on | Cross-project eval: no veto escape, no vetoed or project-tagged fact recalled elsewhere; one mistagged fact listed, none injected (see [Shared pool](#shared-pool)) |
+| Shared pool (prompt inject) | **off** (`[cross_project] inject`) | Answering pool rows rarely clear 0.88 |
 
 ## What works
 

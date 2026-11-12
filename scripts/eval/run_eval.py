@@ -3,6 +3,7 @@
 
   run_eval.py --suite synthetic [--embed fake|ollama] [--variants ...]
   run_eval.py --suite QUESTIONS.jsonl --brain SNAPSHOT_DIR [--embed-models m1,m2+prefix]
+  run_eval.py --suite synthetic --cross-project [--embed fake|ollama]   (cross_project.py)
 
 Runs every question through the production ranking code in scripts/retrieve.py
 (the same functions the recall CLI, MCP server and UserPromptSubmit hook call)
@@ -215,10 +216,11 @@ def _migrate_meta(path: Path) -> None:
         conn.close()
 
 
-def build_synthetic(root: Path, emb: Embedder) -> dict[str, str]:
-    """Materialise the committed synthetic corpus as a brain under *root*.
+def build_synthetic(root: Path, emb: Embedder, extra: tuple[Path, ...] = ()) -> dict[str, str]:
+    """Materialise the committed synthetic corpus (plus *extra* corpus files) as a brain under *root*.
 
-    Returns {project name: project hash}.
+    Each store gets project_path.txt = /synthetic/<name>; a corpus row may set
+    `scope` (default "project"). Returns {project name: project hash}.
     """
     import hashlib  # noqa: PLC0415
     import sqlite3  # noqa: PLC0415
@@ -228,7 +230,8 @@ def build_synthetic(root: Path, emb: Embedder) -> dict[str, str]:
 
     import provenance  # noqa: PLC0415
 
-    corpus = [json.loads(line) for line in (SYNTHETIC_DIR / "corpus.jsonl").read_text().splitlines() if line.strip()]
+    corpus = [json.loads(line) for f in (SYNTHETIC_DIR / "corpus.jsonl", *extra)
+              for line in f.read_text().splitlines() if line.strip()]
     names = sorted({c["project"] for c in corpus})
     hashes = {n: hashlib.sha256(f"synthetic/{n}".encode()).hexdigest()[:12] for n in names}
     base_ts = SYNTHETIC_BASE_TS
@@ -248,6 +251,7 @@ def build_synthetic(root: Path, emb: Embedder) -> dict[str, str]:
         vecs = emb.embed([r["text"] for r in rows], "doc")
         dim = len(vecs[0])
         (root / proj).mkdir(parents=True, exist_ok=True)
+        (root / proj / "project_path.txt").write_text(f"/synthetic/{name}")
         schema = pa.schema(
             [pa.field(f, pa.int64() if f == "ts" else pa.string()) for f in _ROW_FIELDS]
             + [pa.field("vector", pa.list_(pa.float32(), dim))]
@@ -268,10 +272,11 @@ def build_synthetic(root: Path, emb: Embedder) -> dict[str, str]:
             invalid_at = base_ts + int(nxt.get("day", 0)) * 86400 if nxt else None
             m.execute(
                 "INSERT INTO chunks (id, project, session_id, agent_id, kind, ts, content_hash, superseded_by, "
-                "last_accessed, decay_score, pinned, source, trust, taint, invalid_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "last_accessed, decay_score, pinned, source, trust, taint, invalid_at, scope) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (r["id"], proj, r["session_id"], "", r["kind"], r["ts"], r["content_hash"], r["superseded_by"],
-                 r["ts"], float(c.get("decay", 1.0)), int(c.get("pinned", 0)), *prov.row(), invalid_at),
+                 r["ts"], float(c.get("decay", 1.0)), int(c.get("pinned", 0)), *prov.row(), invalid_at,
+                 c.get("scope", "project")),
             )
         m.commit()
         m.close()
@@ -497,7 +502,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--no-offtopic", action="store_true", help="skip the off-topic abstention prompts")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--workdir", type=Path, help="where rebuilt tables are kept (default: temp)")
+    ap.add_argument("--cross-project", action="store_true",
+                    help="synthetic only: the shared-pool suite (leak, benefit, regression, latency)")
     a = ap.parse_args(argv)
+    if a.cross_project and a.suite != "synthetic":
+        ap.error("--cross-project runs on the synthetic suite")
 
     synthetic = a.suite == "synthetic"
     if synthetic:
@@ -514,6 +523,21 @@ def main(argv: list[str] | None = None) -> int:
     endpoint = cfg0["embed"]["endpoint"]
     base_model = cfg0["embed"]["model"]
     emb = Embedder(base_model, endpoint, fake_dim=cfg0["embed"]["dim"] if a.embed == "fake" and synthetic else 0)
+
+    if a.cross_project:
+        import cross_project  # noqa: PLC0415
+
+        try:
+            res = cross_project.main_run(root, emb, cfg0, a.k, not a.no_offtopic)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+        cross_project.print_summary(res["summary"])
+        if a.out:
+            a.out.parent.mkdir(parents=True, exist_ok=True)
+            a.out.write_text(json.dumps({**res, "k": a.k, "embed": "fake" if emb.fake_dim else emb.label,
+                                         "created": int(time.time())}, indent=1, default=str))
+            print(f"wrote {a.out}")
+        return 0
 
     if synthetic:
         names = build_synthetic(root, emb)

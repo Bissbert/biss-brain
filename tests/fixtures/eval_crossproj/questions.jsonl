@@ -1,0 +1,30 @@
+{"id": "x01", "project": "ember-jobs", "query": "why does uv run not use the virtualenv I activated", "answers": [["--active"]], "type": "cross_project"}
+{"id": "x02", "project": "quill-web", "query": "how can I skip doctests when running the rust tests", "answers": [["--lib"]], "type": "cross_project"}
+{"id": "x03", "project": "ember-jobs", "query": "how do I stop pytest from creating its cache folder", "answers": [["no:cacheprovider"]], "type": "cross_project"}
+{"id": "x04", "project": "atlas-api", "query": "why do NA strings turn into NaN when loading a csv", "answers": [["keep_default_na"]], "type": "cross_project"}
+{"id": "x05", "project": "ember-jobs", "query": "why is my environment variable undefined in the vite browser bundle", "answers": [["VITE_"]], "type": "cross_project"}
+{"id": "x06", "project": "ember-jobs", "query": "MissingGreenlet error when reading an attribute after commit in async sqlalchemy", "answers": [["expire_on_commit"]], "type": "cross_project"}
+{"id": "x07", "project": "quill-web", "query": "how do I rebase a whole stack of branches at once", "answers": [["--update-refs"]], "type": "cross_project"}
+{"id": "x08", "project": "harbor-cli", "query": "what format should my commit messages follow", "answers": [["conventional commits"]], "type": "cross_project"}
+{"id": "x09", "project": "atlas-api", "query": "how do I check an object against a typescript type without widening it", "answers": [["satisfies"]], "type": "cross_project"}
+{"id": "x10", "project": "quill-web", "query": "why does my docker image reinstall all dependencies on every code change", "answers": [["lockfile"]], "type": "cross_project"}
+{"id": "x11", "project": "ember-jobs", "query": "in-place sed edit fails on my mac", "answers": [["sed -i ''"]], "type": "cross_project"}
+{"id": "x12", "project": "atlas-api", "query": "can ruff replace black and isort", "answers": [["ruff format"]], "type": "cross_project"}
+{"id": "x13", "project": "harbor-cli", "query": "my end to end browser tests are flaky because of sleeps", "answers": [["toBeVisible"]], "type": "cross_project"}
+{"id": "x14", "project": "ember-jobs", "query": "warning about unclosed connections from httpx at shutdown", "answers": [["context manager"]], "type": "cross_project"}
+{"id": "x15", "project": "quill-web", "query": "which spelling should user-facing text use", "answers": [["British spelling"]], "type": "cross_project"}
+{"id": "x16", "project": "harbor-cli", "query": "sqlite readers block while a write is in progress", "answers": [["journal_mode=WAL"]], "type": "cross_project"}
+{"id": "t01", "project": "quill-web", "query": "what is the staging deploy token", "answers": [["deploy token"]], "type": "no_transfer_veto"}
+{"id": "t02", "project": "ember-jobs", "query": "where are release notes drafted before tagging", "answers": [["release-draft"]], "type": "no_transfer_veto"}
+{"id": "t03", "project": "atlas-api", "query": "who reviews UI changes before they are merged", "answers": [["design-review@"]], "type": "no_transfer_veto"}
+{"id": "t04", "project": "harbor-cli", "query": "what address does the batch runner answer on", "answers": [["10.20.30.40"]], "type": "no_transfer_veto"}
+{"id": "t05", "project": "quill-web", "query": "where are the feature flags documented", "answers": [["wiki.internal"]], "type": "no_transfer_veto"}
+{"id": "t06", "project": "atlas-api", "query": "in which order are plugin manifests loaded", "answers": [["alphabetical order"]], "type": "no_transfer_veto"}
+{"id": "t07", "project": "ember-jobs", "query": "should the coupon field on checkout be collapsed", "answers": [["coupon field"]], "type": "no_transfer_veto"}
+{"id": "t08", "project": "quill-web", "query": "when does the nightly export job run", "answers": [["02:15"]], "type": "no_transfer_local"}
+{"id": "t09", "project": "atlas-api", "query": "which pages are client-rendered", "answers": [["client-rendered"]], "type": "no_transfer_local"}
+{"id": "t10", "project": "harbor-cli", "query": "what format are tenant ids", "answers": [["UUIDv7"]], "type": "no_transfer_local"}
+{"id": "t11", "project": "ember-jobs", "query": "how do I get json output from every subcommand", "answers": [["--json"]], "type": "no_transfer_local"}
+{"id": "t12", "project": "quill-web", "query": "what is the rate limit for free accounts", "answers": [["60 requests per minute"]], "type": "no_transfer_mistag"}
+{"id": "t13", "project": "harbor-cli", "query": "how often is the churn model retrained", "answers": [["every Sunday"]], "type": "no_transfer_mistag"}
+{"id": "t14", "project": "atlas-api", "query": "what is the primary brand colour", "answers": [["#2B59C3"]], "type": "no_transfer_mistag"}

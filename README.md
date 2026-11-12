@@ -76,6 +76,7 @@ with a handful of known mechanisms, and biss-brain borrows them:
 | **Memory updating.** A new fact overrides the old one, and you still remember there was an old one. | A judge compares each new note with its nearest older ones. A contradicted fact is marked replaced and drops out of recall, and its card shows what replaced it. | on |
 | **Source monitoring.** Remembering *where* you learnt something, not only what. | Every note carries its origin. Notes drawn from tool output or web pages rank lower, are never injected on their own, and a low-trust note that reads like an instruction is quarantined. | on |
 | **A sense of self.** A small set of facts that are always present. | Core memory is injected into every session, and nothing joins it without your yes. | on |
+| **Semantic memory.** What many episodes taught you holds outside the place you learnt it. | Notes the distiller tags as true anywhere (a tool quirk, a library lesson) enter a shared pool once they pass a veto for secrets, paths, URLs, addresses and project names. Every project recalls them below its own memories, labelled with where they came from. You can share or unshare a note yourself, and a lesson two projects wrote is suggested for global core. | on; prompt inject off |
 
 In v0.7 each mechanism that could be measured was switched off in turn against a frozen question
 suite ([docs/eval/v0.7-ablation.md](docs/eval/v0.7-ablation.md)). One failed: *retrieval-induced forgetting*, where recalling a memory suppresses its rivals, made
@@ -117,7 +118,11 @@ follows the new version by itself.
 ## Privacy
 
 - **Stored locally.** Memories live in `~/.claude/brain/`, one folder per project. Embedding,
-  indexing and search all run on your machine.
+  indexing and search all run on your machine. A folder outside git shares the store of its
+  highest parent with a project marker (`.biss-brain-root` wins outright).
+- **Projects keep their facts.** Only notes the distiller marks as general, or that you share,
+  reach other projects, and only past the veto. Notes from tool output or web pages never do.
+  Set `[cross_project] enabled = false` to keep every project to itself.
 - **Claude calls go through your login.** Distilling notes, judging conflicts and the nightly
   session summaries run `claude -p` with your Claude Code login, the same service your sessions
   already talk to. Nothing goes anywhere else.
@@ -155,7 +160,8 @@ follows the new version by itself.
 | `SessionStart` (compact) | Re-injects core memory and this session's pre-compaction summary. If the summary is not distilled yet, it injects the conversation-tail digest instead, and the summary follows once on the next prompt. |
 | `UserPromptSubmit` hook | Off by default (`[retrieve] user_prompt_inject`). When on, it injects at most one memory that clears the calibrated gate, once per session, within a 2.5 s deadline. |
 | `/biss-brain:recall <q>` | Manual hybrid search of the project brain. |
-| `/biss-brain:remember <text>` | Explicit user-curated memory (kind=decision auto-pins). `--core [--shared\|--global]` writes core memory instead. |
+| `/biss-brain:remember <text>` | Explicit user-curated memory (kind=decision auto-pins). `--core [--shared\|--global]` writes core memory instead; `--share` also shares it with every project. |
+| `/biss-brain:share <id>` | Share a memory with every project now, checked for secrets only. `--off` takes it back; it then stays in this project. |
 | `/biss-brain:core` | Show, review, accept or reject core-memory proposals; `shared on\|off`; `export` an `@import` line. |
 | `/biss-brain:inject` | Prompt injection for this project: `on`, `off`, or `status` (gate, latency p50/p95, outcomes). |
 | `/biss-brain:ui` | Launch a local web UI to browse and inspect the brain (see below). |
@@ -171,14 +177,15 @@ Press `?` on any page for the keyboard shortcuts and a glossary of the terms the
 | Page | What it is for |
 |---|---|
 | **Overview** | What the next session in this project starts with: the core notes and memories the session-start hook would inject, and the exact text, read without side effects. Below it, every project with its size and last activity. |
-| **Search** | Hybrid search over the project, with filters for kind, date, session, salience and consolidation round. Each card can be pinned or forgotten (forget can be undone), and says what it replaced or what replaced it. |
+| **Search** | Hybrid search over the project, with filters for kind, date, session, salience and consolidation round. Each card can be pinned, shared with every project (`s`) or forgotten; share and forget can be undone. Cards say what they replaced or what replaced them. |
 | **Review** | The few things that want a decision: core-memory proposals to accept or reject, the faintest fading memories to pin or forget, and facts replaced in the last 30 days next to what replaced them. |
+| **Shared** | The shared pool: each memory every project can recall, where it came from and how many projects wrote it. Unshare takes one out (with Undo), and no dream puts it back. |
 | **Sessions** | Recent sessions, and a replay of each one: its notes in order, its subagents, and what each note replaced. |
 | **Timeline** | Captures per day by kind, and how strength fades over time. |
 | **Status** | The flush daemon, the queue, the nightly dream and idle-time maintenance, and the most recent model-call failure, if any. |
 
-The UI only reads, except for pin, forget, labelling a project with its path, and accepting or
-rejecting core proposals, which go through the same code as the slash commands. The server runs
+The UI only reads, except for pin, share, forget, labelling a project with its path, and accepting
+or rejecting core proposals, which go through the same code as the slash commands. The server runs
 detached, survives the terminal closing, and logs to `~/.claude/brain/ui.log`.
 
 ## Core memory
@@ -190,7 +197,7 @@ It comes in three layers, injected in this order:
 |---|---|---|
 | shared | `<repo>/.claude/brain/CORE.md`, committed with the code | You, with `--core --shared` or by hand. Injected only after you opt in for that repo (`/biss-brain:core shared on`); a cloned repo's file is never injected on its own. |
 | private (default) | `~/.claude/brain/core/<repo>.md` | You. |
-| global | `~/.claude/brain/core/_global.md` | You, with `--core --global`. |
+| global | `~/.claude/brain/core/_global.md` | You, with `--core --global`, or by accepting a dream proposal: a pool lesson that two or more projects wrote. |
 
 - The files are the source of truth. Bullets carry `<!-- m:<id> <date> <source> -->`. Hand edits
   win, and deleting a line retires the memory; `core.sqlite` keeps each item's versions.

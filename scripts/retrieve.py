@@ -354,3 +354,116 @@ def prompt_inject(
         return []
     rows = inject_candidates(tbl, meta, proj, qtext, qvec, cfg, exclude)
     return inject_gate(rows, cfg, vector=qvec is not None)
+
+
+def global_candidates(
+    qtext: str,
+    qvec: list[float] | None,
+    cfg: dict,
+    k: int,
+    *,
+    min_cosine: float,
+    for_inject: bool = False,
+    skip_project: str | None = None,
+    tbl: Any = None,
+) -> list[dict]:
+    """Up to *k* live rows of the shared pool at least *min_cosine* close to the query.
+
+    Dense only: a pool row has to mean the same thing as the query, and BM25
+    alone would surface any row that shares a common word. Hypotheses and
+    quarantined rows are never returned; with *for_inject* neither are rows
+    whose provenance may not be injected unasked. Rows copied from
+    *skip_project* are left out (that project has its own copy).
+
+    Each row carries `_cosine`, `_prov`, `_source`, `source_project` (the path
+    it came from), `_is_cross_project` and `_relevance_score` = cosine ×
+    cross_project.rank_multiplier. Empty when the pool is off or missing.
+    *tbl* overrides the pool table (default: globalpool's).
+    """
+    xp = cfg.get("cross_project", {})
+    if not xp.get("enabled", False) or qvec is None or k <= 0:
+        return []
+    import sqlite3 as _sqlite3  # noqa: PLC0415
+
+    import globalpool  # noqa: PLC0415
+    from common import GLOBAL_PROJECT_HASH  # noqa: PLC0415
+
+    if tbl is None:
+        try:
+            tbl = globalpool._pool_table()
+        except Exception:  # noqa: BLE001
+            return []
+    if tbl is None:
+        return []
+    try:
+        raw = vector_search(tbl, list(qvec), F.and_(F.LIVE, F.NOT_HYPOTHESIS, F.NOT_QUARANTINE), max(10, 3 * k))
+    except Exception:  # noqa: BLE001
+        return []
+    raw = [r for r in raw if r["_cosine"] >= min_cosine]
+    if not raw:
+        return []
+    ids = [r["id"] for r in raw]
+    provs: dict = {}
+    origin: dict[str, str] = {}
+    path = globalpool.pool_dir() / "meta.sqlite"
+    try:
+        conn = _sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+        try:
+            provs = provenance.lookup(conn, GLOBAL_PROJECT_HASH, ids)
+            q = ",".join("?" * len(ids))
+            origin = dict(conn.execute(f"SELECT id, source_project FROM chunks WHERE id IN ({q})", ids).fetchall())
+        finally:
+            conn.close()
+    except _sqlite3.Error:
+        pass
+    labels = globalpool.source_labels(ids)
+    mult = float(xp.get("rank_multiplier", 0.8))
+    out = []
+    for r in raw:
+        if skip_project and origin.get(r["id"]) == skip_project:
+            continue
+        prov = provs.get(r["id"])
+        if for_inject and not provenance.injectable(prov, cfg):
+            continue
+        out.append({**r, "_prov": prov, "_source": provenance.label(prov),
+                    "source_project": labels.get(r["id"], "__global__"), "_is_cross_project": True,
+                    "_relevance_score": r["_cosine"] * mult})
+    return out[:k]
+
+
+def pool_inject(
+    qtext: str,
+    qvec: list[float] | None,
+    cfg: dict,
+    proj: str,
+    rows: list[dict],
+    exclude: frozenset[str] | set[str] = frozenset(),
+) -> list[dict]:
+    """Shared-pool rows to add to a UserPromptSubmit injection of *rows*.
+
+    Off unless cross_project.enabled and cross_project.inject. At most
+    inject_max rows, only into slots *rows* left free under inject_top_k and
+    within what is left of inject_max_chars; never a row in *exclude* (the
+    session ledger) or one repeating a local row's text. The hook and the eval
+    both call this. Pool rows are not counted as retrievals anywhere (R3).
+    """
+    xp, r = cfg.get("cross_project", {}), cfg["retrieve"]
+    if not (xp.get("enabled") and xp.get("inject")) or qvec is None:
+        return []
+    free = min(int(xp.get("inject_max", 1)), int(r.get("inject_top_k", 2)) - len(rows))
+    if free <= 0:
+        return []
+    have = {" ".join(x.get("text", "").lower().split()) for x in rows}
+    cands = global_candidates(qtext, qvec, cfg, free + len(exclude) + len(rows),
+                              min_cosine=float(xp.get("inject_min_cosine", 0.88)),
+                              for_inject=True, skip_project=proj)
+    budget = int(r.get("inject_max_chars", 6000)) - sum(len(x.get("text", "")) for x in rows)
+    out: list[dict] = []
+    for c in cands:
+        if c["id"] in exclude or " ".join(c.get("text", "").lower().split()) in have:
+            continue
+        if len(c.get("text", "")) > budget or len(out) >= free:
+            break
+        budget -= len(c.get("text", ""))
+        out.append(c)
+    return out

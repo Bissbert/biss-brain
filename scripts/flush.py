@@ -706,13 +706,14 @@ def _store_window(
     if not any(groups.values()):
         log.info("no findings for %s/%s", proj, kind)
         return [], None
-    parts = [("\n".join(t for _, t in lines), provenance.derive((s for s, _ in lines), cfg), salience.get(g))
+    parts = [("\n".join(t for _, t in lines), provenance.derive((s for s, _ in lines), cfg), salience.get(g),
+              "general" if g == "general" else "project")
              for g, lines in groups.items() if lines]
 
     meta = open_meta(cwd)
     try:
         prepared = []
-        for text, prov, sal in parts:
+        for text, prov, sal, scope in parts:
             h = content_hash(text)
             cur = meta.execute("SELECT id FROM chunks WHERE content_hash = ?", (h,)).fetchone()
             if cur:
@@ -727,10 +728,10 @@ def _store_window(
                 # Keep the paid distill: store now, embed later (_backfill).
                 log.warning("embed failed (%s); storing without a vector", e)
                 vec = None
-            prepared.append((text, h, prov, vec, sal))
+            prepared.append((text, h, prov, vec, sal, scope))
         stored = [
-            r for r in (_store_chunk(cwd, proj, kind, last, meta, t, h, pv, v, cfg, salience=sal)
-                        for t, h, pv, v, sal in prepared) if r
+            r for r in (_store_chunk(cwd, proj, kind, last, meta, t, h, pv, v, cfg, salience=sal, scope=sc)
+                        for t, h, pv, v, sal, sc in prepared) if r
         ]
     finally:
         meta.close()
@@ -828,11 +829,13 @@ def _link_and_judge(cwd: str, done: list[tuple[dict, list[float]]], cfg: dict) -
 def _store_chunk(
     cwd: str, proj: str, kind: str, last: Event, meta, text: str, h: str,
     prov: provenance.Provenance, vec: list[float] | None, cfg: dict, salience: int | None = None,
+    scope: str = "project",
 ) -> tuple[str, str, list[float] | None, str] | None:
     """Salience, reconsolidation and insert for one provenance group.
 
     *salience* is the distiller's score for the group; without one the
-    length/novelty heuristic (compute_salience) is used.
+    length/novelty heuristic (compute_salience) is used. A *scope* "general"
+    chunk is never merged into a project chunk (it would lose its scope).
 
     Low-trust text that reads like an instruction is stored as
     kind=quarantine and never merged. Returns (chunk_id, text, vec, kind) for
@@ -856,7 +859,7 @@ def _store_chunk(
     # ── reconsolidation (pre-insert) ─────────────────────────────────────
     # If a labile candidate of the same trust class is close enough, merge
     # in-place and skip insert.
-    merged_id = None if kind == "quarantine" or vec is None else _try_reconsolidate(cwd, tbl, meta, text, vec, cfg, prov)
+    merged_id = None if kind == "quarantine" or vec is None or scope != "project" else _try_reconsolidate(cwd, tbl, meta, text, vec, cfg, prov)
     if merged_id is not None:
         log.info("reconsolidate: merged into existing chunk %s; skipping insert for %s/%s",
                  merged_id[:8], proj, kind)
@@ -881,9 +884,10 @@ def _store_chunk(
     refresh_fts(tbl)
     meta.execute(
         "INSERT INTO chunks (id, project, session_id, agent_id, kind, ts, content_hash, superseded_by, "
-        "last_accessed, salience, source, trust, taint, valid_from) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?)",
-        (chunk_id, proj, last.session_id, last.agent_id, kind, ts, h, ts, salience, *prov.row(), valid_from),
+        "last_accessed, salience, source, trust, taint, valid_from, scope) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)",
+        (chunk_id, proj, last.session_id, last.agent_id, kind, ts, h, ts, salience, *prov.row(), valid_from,
+         "general" if scope == "general" and kind != "quarantine" else "project"),
     )
     meta.commit()
     log.info("indexed chunk %s (%s/%s, %s)", chunk_id[:8], proj, kind, provenance.label(prov))

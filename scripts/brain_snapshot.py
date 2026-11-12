@@ -6,7 +6,7 @@ Usage:
 
 Copies each selected project directory (meta.sqlite via the SQLite backup API,
 so WAL contents are included consistently; lancedb/ and project_path.txt via
-copytree) plus config.toml into DEST. Never writes to SRC.
+copytree) plus config.toml, store.json and core.sqlite into DEST. Never writes to SRC.
 
 DEST must not be inside SRC and SRC must not be inside DEST. Point
 BISS_BRAIN_ROOT at DEST to run any brain script against the copy.
@@ -117,6 +117,10 @@ def snapshot(
         manifest["projects"].append({"hash": d.name, "path": _project_path(d)})
     if (src / "config.toml").exists():
         shutil.copy2(src / "config.toml", dest / "config.toml")
+    if (src / "store.json").exists():
+        shutil.copy2(src / "store.json", dest / "store.json")
+    if (src / "core.sqlite").exists():  # core index and proposals
+        _backup_sqlite(src / "core.sqlite", dest / "core.sqlite")
     (dest / "SNAPSHOT.json").write_text(json.dumps(manifest, indent=2))
     return manifest
 

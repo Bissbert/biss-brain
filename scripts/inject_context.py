@@ -26,6 +26,7 @@ import html  # noqa: E402
 import json  # noqa: E402
 import os  # noqa: E402
 import sys  # noqa: E402
+from pathlib import Path  # noqa: E402
 
 # lancedb costs ~0.8 s to import; it loads only on paths that read the store,
 # so disabled, killed and trivial prompts exit in tens of ms.
@@ -46,7 +47,7 @@ import provenance  # noqa: E402
 import scope  # noqa: E402
 import temporal  # noqa: E402
 from effects import touch_injected  # noqa: E402
-from retrieve import prompt_inject, trivial_prompt  # noqa: E402
+from retrieve import pool_inject, prompt_inject, trivial_prompt  # noqa: E402
 
 
 def _embed_with_timeout(text: str, cfg: dict, timeout_s: float) -> list[float] | None:
@@ -185,6 +186,9 @@ def _attrs(c: dict) -> str:
     ]
     if _SESSION.match(sid):
         attrs.append(f'session="{sid}"')
+    if c.get("_is_cross_project"):
+        origin = os.path.basename(str(c.get("source_project") or "").rstrip("/")) or "unknown"
+        attrs += ['scope="global"', f'from="{html.escape(origin, quote=True)}"']
     return " ".join(attrs)
 
 
@@ -281,14 +285,42 @@ def session_start_context(core_ctx: str, chunks: list[dict]) -> str:
     return _join(core_ctx, _frame_chunks(chunks, "Recent project memory (biss-brain)"))
 
 
-def _emit(event_name: str, context: str) -> None:
-    out = {
+def _emit(event_name: str, context: str, notice: str = "") -> None:
+    out: dict = {
         "hookSpecificOutput": {
             "hookEventName": event_name,
             "additionalContext": context,
         }
     }
+    if notice:
+        out["systemMessage"] = notice
     print(json.dumps(out))
+
+
+def pinned_jobs_notice(agents: Path | None = None) -> str:
+    """A line for the user when a launchd job still runs one fixed plugin copy.
+
+    Installs before 0.8.0 wrote the plugin's versioned path into the plist, so
+    the nightly pass kept running that version after every update. Doctor
+    reports it too, but only when someone runs doctor.
+    """
+    if sys.platform != "darwin" and agents is None:
+        return ""
+    import plistlib  # noqa: PLC0415
+
+    agents = agents or Path.home() / "Library" / "LaunchAgents"
+    stale = []
+    for plist in sorted(agents.glob("ch.bissbert.biss-brain.*.plist")):
+        try:
+            args = plistlib.loads(plist.read_bytes()).get("ProgramArguments") or []
+        except (OSError, ValueError):
+            continue
+        if args and not (Path(args[0]).name == "run" and Path(args[0]).parent.name == "bin"):
+            stale.append(plist.stem.rsplit(".", 1)[-1])
+    if not stale:
+        return ""
+    return (f"biss-brain: the {' and '.join(stale)} job still runs an old plugin copy and misses "
+            "updates. Run /biss-brain:install once to switch it to the runner that follows them.")
 
 
 def _core_texts(cwd: str) -> set[str]:
@@ -322,7 +354,19 @@ def _select(cwd: str, cfg: dict, prompt: str, sid: str, pdir, t0: float) -> tupl
             touch_injected(meta, proj_key, [x["id"] for x in rows])
     finally:
         meta.close()
-    return rows, {**info, "outcome": "injected" if rows else "abstain"}
+    pooled, g_info = _pool_row(cfg, prompt, qvec, proj_key, rows, seen)
+    rows = rows + pooled
+    return rows, {**info, **g_info, "outcome": "injected" if rows else "abstain"}
+
+
+def _pool_row(cfg: dict, prompt: str, qvec, proj: str, rows: list[dict], seen) -> tuple[list[dict], dict]:
+    """retrieve.pool_inject plus its metrics (global_n, global_ms); {} when the pool inject is off."""
+    xp = cfg.get("cross_project", {})
+    if not (xp.get("enabled") and xp.get("inject")) or qvec is None:
+        return [], {}
+    t = time.perf_counter()
+    out = pool_inject(prompt, qvec, cfg, proj, rows, seen)
+    return out, {"global_n": len(out), "global_ms": round((time.perf_counter() - t) * 1000, 1)}
 
 
 def _user_prompt_submit(cwd: str, cfg: dict, hook: dict, pdir) -> int:
@@ -435,9 +479,10 @@ def main() -> int:
     sid = str(hook.get("session_id") or "")
     if mode == "post_compact":
         return _post_compact(cwd, cfg, proj, sid, core_ctx)
+    notice = pinned_jobs_notice() if mode == "session_start" else ""
     if not (proj / "lancedb").exists():
-        if core_ctx:
-            _emit("SessionStart", core_ctx)
+        if core_ctx or notice:
+            _emit("SessionStart", core_ctx, notice)
         return 0  # cold project, no recalled memory
 
     if mode == "session_start":
@@ -446,8 +491,8 @@ def main() -> int:
         S.ledger_add(proj, sid, [c["id"] for c in chunks], reset=hook.get("source") != "resume")
         S.prune_ledgers(proj)
         ctx = session_start_context(core_ctx, chunks)
-        if ctx:
-            _emit("SessionStart", ctx)
+        if ctx or notice:
+            _emit("SessionStart", ctx, notice)
         return 0
 
     if mode == "user_prompt_submit":

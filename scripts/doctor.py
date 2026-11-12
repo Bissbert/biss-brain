@@ -364,6 +364,48 @@ def scope_checks(cwd: str, cfg: dict) -> list[tuple[str, str]]:
     return out
 
 
+def pool_checks(cfg: dict, root: Path, now: float | None = None) -> list[tuple[str, str]]:
+    """The shared pool: general facts dream left unpooled long after they were due, and
+    pool copies whose project store is gone. Counts only; opens every database read-only."""
+    import sqlite3  # noqa: PLC0415
+
+    import globalpool  # noqa: PLC0415
+    import provenance  # noqa: PLC0415
+
+    xp = cfg.get("cross_project", {})
+    if not xp.get("enabled") or xp.get("promote", "scope") != "scope":
+        return []
+    # a fact is due promote_after_hours after it was written; two more days covers a missed night
+    due = (time.time() if now is None else now) - (float(xp.get("promote_after_hours", 24)) + 48) * 3600
+    never = ",".join("?" * len(globalpool.NEVER_POOLED))
+    waiting, gone = 0, 0
+    for m in sorted(root.glob("*/meta.sqlite")):
+        try:
+            c = sqlite3.connect(f"file:{m}?mode=ro", uri=True)
+            try:
+                if m.parent.name == "_global":
+                    srcs = [r[0] for r in c.execute("SELECT DISTINCT source_project FROM chunks "
+                                                    "WHERE superseded_by = '' AND source_project != ''")]
+                    gone += sum(1 for h in srcs if not (root / h / "meta.sqlite").exists())
+                    continue
+                waiting += c.execute(
+                    f"SELECT COUNT(*) FROM chunks WHERE scope = 'general' AND superseded_by = '' "
+                    f"AND cross_eligible = 0 AND global_veto = '' AND kind NOT IN ({never}) AND ts < ? "
+                    f"AND {provenance.trusted_sql()}", (*globalpool.NEVER_POOLED, due)).fetchone()[0]
+            finally:
+                c.close()
+        except sqlite3.Error:
+            continue  # an older schema (no scope column yet) has nothing to promote
+    out: list[tuple[str, str]] = []
+    if waiting:
+        out.append((f"{waiting} general fact(s) are overdue for the shared pool",
+                    "The dream pass promotes them; check it runs: launchctl list | grep biss-brain"))
+    if gone:
+        out.append((f"the shared pool holds copies from {gone} project store(s) that no longer exist",
+                    "Retract them with forget --global, or keep them: they are general facts."))
+    return out
+
+
 def main() -> int:
     print("biss-brain doctor\n")
     all_ok = True
@@ -473,6 +515,7 @@ def main() -> int:
         ("scope", lambda: scope_checks(cwd, cfg)),
         ("core memory", lambda: core_checks(cwd, cfg)),
         ("prompt injection", lambda: inject_checks(cwd, cfg)),
+        ("shared pool", lambda: pool_checks(cfg, BRAIN_ROOT)),
     )
     for title, check in sections:
         try:

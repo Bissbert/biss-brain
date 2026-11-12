@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Mark one or more chunks as superseded. Soft-delete; chunks remain queryable
-via explicit id but never surface in default search."""
+via explicit id but never surface in default search.
+
+A forgotten chunk's copy in the shared pool is retracted at once.
+`forget.py --global <id> ...` retracts pool rows by id from any project; the
+rows they came from are kept local from then on."""
 from __future__ import annotations
 
 import os
@@ -8,14 +12,41 @@ import sys
 
 import lancedb
 
+import globalpool
 import lance_filter as F
 from common import lancedb_dir, open_meta, project_key, tombstone_id
 
 
+def _forget_global(ids: list[str]) -> int:
+    import sqlite3  # noqa: PLC0415
+
+    path = globalpool.pool_dir() / "meta.sqlite"
+    if not path.exists():
+        print("  the shared pool is empty")
+        return 0
+    conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+    try:
+        for cid in ids:
+            if not cid or not all(c in "0123456789abcdef-" for c in cid.lower()):
+                print(f"  not an id: {cid}")
+                continue
+            row = conn.execute("SELECT id FROM chunks WHERE id LIKE ? AND superseded_by = '' LIMIT 1",
+                               (cid.lower() + "%",)).fetchone()
+            if row and globalpool.retract(row[0], veto_reason="user"):
+                print(f"  unshared: {row[0][:8]}")
+            else:
+                print(f"  no match: {cid}")
+    finally:
+        conn.close()
+    return 0
+
+
 def main() -> int:
-    if len(sys.argv) < 2:
-        print("usage: forget.py <chunk_id> [<chunk_id> ...]", file=sys.stderr)
+    if len(sys.argv) < 2 or sys.argv[1:] == ["--global"]:
+        print("usage: forget.py [--global] <chunk_id> [<chunk_id> ...]", file=sys.stderr)
         return 1
+    if sys.argv[1] == "--global":
+        return _forget_global(sys.argv[2:])
     cwd = os.getcwd()
     proj = project_key(cwd)
     meta = open_meta(cwd)
@@ -58,6 +89,11 @@ def main() -> int:
                     )
             except Exception as e:  # noqa: BLE001
                 print(f"  warn: LanceDB update failed: {e}", file=sys.stderr)
+        try:
+            if globalpool.retract_sources(proj, full_ids):
+                print("  also removed from the shared pool")
+        except Exception as e:  # noqa: BLE001
+            print(f"  warn: shared pool update failed: {e}", file=sys.stderr)
     return 0
 
 

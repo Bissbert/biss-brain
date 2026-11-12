@@ -1,6 +1,6 @@
 ---
 description: Save an explicit user memory into the project brain.
-argument-hint: "[--kind decision|note|code|task] [--pin] [--core [--shared|--global] [--section decisions|conventions|lessons|pinned]] <text>"
+argument-hint: "[--kind decision|note|code|task] [--pin] [--share] [--core [--shared|--global] [--section decisions|conventions|lessons|pinned]] <text>"
 disable-model-invocation: true
 ---
 

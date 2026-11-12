@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.10.0 — 2026-11-12
+
+Memories written in one project can now help in the others, through a shared pool that only
+general, vetted facts enter.
+
+### Added
+
+- **Shared pool.** The distiller tags each fact `project` or `general`, and each session arc may
+  add up to three portable lessons. The dream copies general facts into a `_global` store once
+  they pass a veto for secrets, home paths, mail and IP addresses, URLs, project names and length.
+  Facts from tool or web output never go. An equal fact from another project joins the existing
+  row; forget, supersede and rewording in the source follow it.
+- Recall, `search_memory` and the UI list pool rows after local ones, labelled with their origin,
+  above an absolute cosine of 0.85 and ranked below local rows of equal relevance. The prompt
+  hook can add one pool row (`[cross_project] inject`, off).
+- `/biss-brain:share <id>` and `remember --share` share a memory with every project at once,
+  checked for secrets only; `--off` takes it back and keeps it local. Both are user-typed only.
+- UI: Share and Unshare on each card (`s`), with Undo, and a **Shared** page (`g p`) listing the
+  pool with where each row came from. Unsharing there keeps every writer's copy local, with Undo.
+- The dream proposes pool lessons that two or more projects wrote for global core.
+- The doctor warns about general facts overdue for the pool and pool rows whose project store
+  is gone.
+- Session start says so when a nightly or idle job still runs a plugin copy from before 0.8.0.
+  Those jobs kept running the old version after every update, so the 0.9.0 store compaction
+  never ran at night. `/biss-brain:install` once switches them to the runner that follows updates.
+- A cross-project eval suite measures veto escapes, leaks into other projects, pool benefit and
+  the latency the pool adds.
+
+### Changed
+
+- **A folder outside git shares the store of its highest parent with a project marker**
+  (`.biss-brain-root` wins outright), never at or above `$HOME` or a `[scope] generic_roots`
+  folder. Existing per-subfolder stores stay until you fold them:
+  `scripts/migrate_fold_stores.py` (dry run), then `--apply` with the flush daemon stopped. It
+  writes a backup to `~/.claude/brain-backups/fold-<stamp>` first.
+- `[cross_project] enabled` defaults to true.
+- MCP cross-links are written in the caller's project; the pool reads through one path with
+  batched index refreshes and nightly compaction.
+
+### Removed
+
+- `[cross_project.admission.frequency] distinct_projects` and `window_days`, which nothing read.
+
 ## 0.9.0 — 2026-10-29
 
 The web UI is reworked around the decisions a memory store asks of you, and the store stops

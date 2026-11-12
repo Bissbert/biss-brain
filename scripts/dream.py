@@ -36,6 +36,7 @@ import argparse
 import json
 import logging
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -63,6 +64,7 @@ from common import (  # noqa: E402
     refresh_fts,
     vector_search,
 )
+import globalpool  # noqa: E402
 import lance_filter as F  # noqa: E402
 import provenance  # noqa: E402
 import temporal  # noqa: E402
@@ -435,6 +437,65 @@ def _open_or_create_lance_table(pdir: Path, dim: int):
     return open_or_create_chunks(pdir / "lancedb", dim)
 
 
+_LESSON = re.compile(r"^\s*(?:[-*]\s*)?LESSON:\s*(.*?)\s*$", re.IGNORECASE)
+MAX_ARC_LESSONS = 3
+
+
+def split_lessons(summary: str) -> tuple[str, list[str]]:
+    """An arc reply's bullets, and its `LESSON:` lines (at most MAX_ARC_LESSONS)."""
+    keep, lessons = [], []
+    for line in summary.splitlines():
+        m = _LESSON.match(line)
+        if m:
+            lessons.append(" ".join(m.group(1).split()))
+        else:
+            keep.append(line)
+    return "\n".join(keep).strip(), [x for x in lessons if x][:MAX_ARC_LESSONS]
+
+
+def _store_arc_lessons(pdir: Path, tbl, proj: str, sid: str, arc_id: str, lessons: list[str],
+                       prov, valid_from: int, cfg: dict) -> int:
+    """Each portable lesson of an arc as its own chunk: kind lesson, scope general.
+
+    Provenance is the arc's (its members' taint), so a lesson is never more
+    trusted than what it came from. Returns the count stored.
+    """
+    n = 0
+    for text in lessons:
+        body = f"- {text}"
+        ch = content_hash(body)
+        meta = _open_meta_direct(pdir)
+        try:
+            if meta.execute("SELECT 1 FROM chunks WHERE content_hash = ? AND project = ?", (ch, proj)).fetchone():
+                continue
+        finally:
+            meta.close()
+        try:
+            vec = _embed(body, cfg)
+            lid = uuid.uuid4().hex
+            ts = now_unix()
+            tbl.add([{"id": lid, "project": proj, "session_id": sid, "agent_id": "", "kind": "lesson",
+                      "ts": ts, "text": body, "content_hash": ch, "superseded_by": "", "vector": vec}])
+        except Exception as e:  # noqa: BLE001
+            log.warning("dream stage2: lesson insert failed for session %s: %s", sid[:8], e)
+            continue
+        meta = _open_meta_direct(pdir)
+        try:
+            meta.execute(
+                "INSERT INTO chunks (id, project, session_id, agent_id, kind, ts, content_hash, superseded_by, "
+                " last_accessed, evidence_ids, consolidation_round, last_dream_ts, source, trust, taint, "
+                " valid_from, scope) VALUES (?, ?, ?, '', 'lesson', ?, ?, '', ?, ?, 1, ?, ?, ?, ?, ?, 'general')",
+                (lid, proj, sid, ts, ch, ts, arc_id, ts, *prov.row(), valid_from),
+            )
+            meta.commit()
+        finally:
+            meta.close()
+        n += 1
+    if n:
+        refresh_fts(tbl)
+    return n
+
+
 def _stage2a_arcs(pdir: Path, proj: str, cfg: dict, dry_run: bool) -> int:
     """Distill one summary chunk per session whose chunks haven't been consolidated."""
     cooldown_h = int(cfg["dream"].get("session_cooldown_hours", 6))
@@ -520,6 +581,7 @@ def _stage2a_arcs(pdir: Path, proj: str, cfg: dict, dry_run: bool) -> int:
             continue
 
         summary = _distill_arc(joined, model=arc_model, kind="arc")
+        summary, lessons = split_lessons(summary or "")
         if not summary:
             log.warning("dream stage2: empty distill output for session %s", sid[:8])
             continue
@@ -577,6 +639,9 @@ def _stage2a_arcs(pdir: Path, proj: str, cfg: dict, dry_run: bool) -> int:
             meta.commit()
         finally:
             meta.close()
+
+        if lessons and cfg.get("cross_project", {}).get("arc_lessons", True):
+            _store_arc_lessons(pdir, tbl, proj, sid, arc_id, lessons, arc_prov, arc_valid_from, cfg)
 
         arcs_built += 1
         log.info("dream stage2: built arc %s for session %s (%d members)",
@@ -752,54 +817,60 @@ def _open_global_lance(cfg: dict):
     return db, db.open_table("chunks")
 
 
+def _field(chunk, key: str, default=None):
+    """chunk[key] for a sqlite3.Row or dict; *default* when the column is absent."""
+    if isinstance(chunk, sqlite3.Row):
+        return chunk[key] if key in chunk.keys() else default
+    return chunk.get(key, default)
+
+
 def _eligible_for_global(chunk: sqlite3.Row, cfg: dict) -> bool:
     """Return True if the chunk passes the _global admission gate.
 
-    Gates (all must pass):
-      1. kind ∈ cfg.cross_project.admission.eligible_kinds
-      2. consolidation_round >= cfg.cross_project.admission.min_consolidation_round
-      3. pinned == 1  OR  retrieval_count_local >= min_retrievals
-
-    This is conservative by default (Path A from orchestration spec §4.1):
-    under-admits rather than over-admits.  Distinct-projects count is deferred
-    to v0.7 (Path B).
+    Admitted (cross_project.promote = "scope", the default):
+      - a fact tagged scope=general that the user pinned (shared), at once;
+      - any other scope=general fact once it is promote_after_hours old, so
+        its project's conflict sweep may replace it first;
+      - the older path: kind in eligible_kinds, consolidation_round >=
+        min_consolidation_round, and pinned or retrieved min_retrievals times.
+    "pinned_only" admits only the first, "off" nothing. Quarantine,
+    hypothesis, arc and daily_summary rows never leave their project. The text
+    itself is checked afterwards (globalpool.veto).
     """
-    admission = cfg["cross_project"]["admission"]
-    eligible_kinds = admission["eligible_kinds"]
-    min_round = admission["min_consolidation_round"]
-    min_retrievals = admission["frequency"]["min_retrievals"]
+    xp = cfg["cross_project"]
+    mode = xp.get("promote", "scope")
+    if mode == "off":
+        return False
+    kind = _field(chunk, "kind", "") or ""
+    if kind in globalpool.NEVER_POOLED:
+        return False
+    pinned = _field(chunk, "pinned", 0) or 0
+    general = (_field(chunk, "scope", "project") or "project") == "general"
+    if general and pinned == 1:
+        return True
+    if mode == "pinned_only":
+        return False
+    if general:
+        wait = float(xp.get("promote_after_hours", 24)) * 3600
+        return (_field(chunk, "ts", 0) or 0) <= now_unix() - wait
 
-    kind = chunk["kind"] if isinstance(chunk, sqlite3.Row) else chunk.get("kind", "")
-    consolidation_round = (
-        chunk["consolidation_round"]
-        if isinstance(chunk, sqlite3.Row)
-        else chunk.get("consolidation_round", 0)
-    ) or 0
-    pinned = (
-        chunk["pinned"] if isinstance(chunk, sqlite3.Row) else chunk.get("pinned", 0)
-    ) or 0
-    retrieval_count_local = (
-        chunk["retrieval_count_local"]
-        if isinstance(chunk, sqlite3.Row)
-        else chunk.get("retrieval_count_local", 0)
-    ) or 0
-
-    if kind not in eligible_kinds:
+    admission = xp["admission"]
+    if kind not in admission["eligible_kinds"]:
         return False
-    if consolidation_round < min_round:
+    if (_field(chunk, "consolidation_round", 0) or 0) < admission["min_consolidation_round"]:
         return False
-    if not (pinned == 1 or retrieval_count_local >= min_retrievals):
-        return False
-    return True
+    retrievals = _field(chunk, "retrieval_count_local", 0) or 0
+    return pinned == 1 or retrievals >= admission["frequency"]["min_retrievals"]
 
 
 def _select_global_candidates(pdir: Path, proj: str, cfg: dict) -> list[sqlite3.Row]:
-    """Return chunks that are not yet cross_eligible and could qualify for _global."""
+    """Return live, trusted chunks not yet pooled or vetoed that could qualify for _global."""
     admission = cfg["cross_project"]["admission"]
     eligible_kinds = admission["eligible_kinds"]
     min_round = admission["min_consolidation_round"]
 
     kinds_placeholder = ",".join("?" * len(eligible_kinds))
+    never = ",".join("?" * len(globalpool.NEVER_POOLED))
     meta = _open_meta_direct(pdir)
     try:
         rows = meta.execute(
@@ -807,11 +878,12 @@ def _select_global_candidates(pdir: Path, proj: str, cfg: dict) -> list[sqlite3.
             f"WHERE project = ? "
             f"AND superseded_by = '' "
             f"AND cross_eligible = 0 "
-            f"AND kind IN ({kinds_placeholder}) "
-            f"AND consolidation_round >= ? "
+            f"AND global_veto = '' "
+            f"AND kind NOT IN ({never}) "
+            f"AND ((kind IN ({kinds_placeholder}) AND consolidation_round >= ?) OR scope = 'general') "
             # tool/web-tainted memories stay in their project
             f"AND {provenance.trusted_sql()}",
-            (proj, *eligible_kinds, min_round),
+            (proj, *globalpool.NEVER_POOLED, *eligible_kinds, min_round),
         ).fetchall()
     finally:
         meta.close()
@@ -824,14 +896,21 @@ def _two_phase_promote(
     pdir: Path,
     cfg: dict,
     dry_run: bool,
+    *,
+    refresh: bool = True,
 ) -> bool:
     """Atomically promote a chunk to _global.
+
+    The pool row keeps the chunk's id and records where it came from
+    (source_project, source_id, source_projects). With refresh=False the
+    caller rebuilds the pool's FTS index once after a batch.
 
     Phase 1: write to _global meta.sqlite + lancedb.
     Phase 2: only on success, set cross_eligible=1 on the source chunk.
 
     If Phase 1 fails, the source chunk is untouched (cross_eligible stays 0).
-    The global write is INSERT OR IGNORE so re-runs are no-ops (idempotent).
+    The global write is INSERT OR IGNORE so re-runs are no-ops (idempotent);
+    a retracted pool row with the same id is revived.
 
     NEVER writes superseded_by — R2 invariant.
     """
@@ -856,8 +935,10 @@ def _two_phase_promote(
                 "(id, project, session_id, agent_id, kind, ts, content_hash, "
                 " superseded_by, pinned, retrieval_count, last_accessed, "
                 " consolidation_round, last_dream_ts, cross_eligible, "
-                " retrieval_count_local, source, trust, taint) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, NULL, ?, 0, 1, 0, ?, ?, ?)",
+                " retrieval_count_local, source, trust, taint, "
+                " scope, source_project, source_id, source_projects) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, 0, NULL, ?, 0, 1, 0, ?, ?, ?, "
+                " 'general', ?, ?, ?)",
                 (
                     chunk_id,
                     GLOBAL_PROJECT_HASH,
@@ -868,7 +949,19 @@ def _two_phase_promote(
                     chunk["content_hash"],
                     chunk["consolidation_round"],
                     *provenance.from_row(chunk["source"], chunk["trust"], chunk["taint"]).row(),
+                    source_proj,
+                    chunk_id,
+                    json.dumps([source_proj]),
                 ),
+            )
+            # the pool row keeps the source's id: a source that was forgotten
+            # and restored (or unshared and shared again) finds its retracted
+            # copy here and brings it back instead of being ignored
+            g_conn.execute(
+                "UPDATE chunks SET superseded_by = '', content_hash = ?, source_project = ?, "
+                "source_id = ?, source_projects = ? WHERE id = ? AND project = ? AND superseded_by != ''",
+                (chunk["content_hash"], source_proj, chunk_id, json.dumps([source_proj]),
+                 chunk_id, GLOBAL_PROJECT_HASH),
             )
             g_conn.commit()
         finally:
@@ -890,6 +983,7 @@ def _two_phase_promote(
                 if src_vec is not None:
                     g_tbl = _open_or_create_lance_table(global_pdir, cfg["embed"]["dim"])
                     try:
+                        g_tbl.delete(F.eq("id", chunk_id))  # one lance row per id
                         g_tbl.add(
                             [
                                 {
@@ -906,7 +1000,8 @@ def _two_phase_promote(
                                 }
                             ]
                         )
-                        refresh_fts(g_tbl)
+                        if refresh:
+                            refresh_fts(g_tbl)
                     except Exception as e:  # noqa: BLE001
                         log.warning(
                             "global promotion LanceDB write failed for %s: %s",
@@ -927,8 +1022,8 @@ def _two_phase_promote(
         src_conn = _open_meta_direct(pdir)
         try:
             src_conn.execute(
-                "UPDATE chunks SET cross_eligible = 1 WHERE id = ? AND project = ?",
-                (chunk_id, source_proj),
+                "UPDATE chunks SET cross_eligible = 1, global_id = ? WHERE id = ? AND project = ?",
+                (chunk_id, chunk_id, source_proj),
             )
             src_conn.commit()
         finally:
@@ -1021,21 +1116,20 @@ def _stage_nrem2_edge_drain(pdir: Path, proj: str, cfg: dict, dry_run: bool) -> 
     return promoted
 
 
-def _stage_promote_to_global(pdir: Path, cfg: dict, dry_run: bool = False) -> int:
-    """NREM-3 sub-stage: promote eligible chunks to the _global project.
+def _stage_promote_to_global(pdir: Path, cfg: dict, dry_run: bool = False,
+                             only: set[str] | None = None) -> int:
+    """NREM-3 sub-stage: copy this project's portable facts into the _global pool.
 
-    Called from run_stage2 (post arc-distillation). Gated permanently on
-    cfg["cross_project"]["enabled"] — when False (the permanent default) this
-    function is a no-op.
+    Called from run_stage2 (post arc-distillation). A no-op unless
+    cfg["cross_project"]["enabled"].
 
-    Eligibility requirements (all must pass):
-      - kind ∈ eligible_kinds  (default: schema, lesson, hypothesis)
-      - consolidation_round >= min_consolidation_round  (default: 1)
-      - pinned == 1  OR  retrieval_count_local >= min_retrievals  (default: 5)
+    Each candidate passes _eligible_for_global, then globalpool.veto on its
+    text; a vetoed chunk is marked global_veto and not looked at again. A
+    candidate within dedup_cosine of a live pool row joins that row
+    (source_projects) instead of being copied. Copies are two-phase
+    (_two_phase_promote); the pool's FTS index is rebuilt once at the end.
 
-    Promotion is two-phase atomic:
-      Phase 1: write chunk to _global (INSERT OR IGNORE — idempotent)
-      Phase 2: set cross_eligible=1 on source only after Phase 1 succeeds
+    *only* limits the pass to those ids (globalpool.share).
 
     NEVER writes superseded_by — R2 invariant enforced structurally.
     """
@@ -1044,18 +1138,55 @@ def _stage_promote_to_global(pdir: Path, cfg: dict, dry_run: bool = False) -> in
         return 0
 
     proj = pdir.name
-    candidates = _select_global_candidates(pdir, proj, cfg)
-    promoted = 0
+    candidates = [c for c in _select_global_candidates(pdir, proj, cfg)
+                  if (only is None or c["id"] in only) and _eligible_for_global(c, cfg)]
+    if not candidates:
+        return 0
+    _, src_tbl = _open_lance(pdir)
+    if src_tbl is None:
+        return 0
+    texts = {r["id"]: r for r in fetch_by_ids(src_tbl, [c["id"] for c in candidates])}
+    tokens = globalpool.project_tokens(BRAIN_ROOT)
+    gpdir = BRAIN_ROOT / "_global"
+    promoted, copied = 0, 0
+    vetoed: list[tuple[str, str]] = []
 
     for chunk in candidates:
-        if not _eligible_for_global(chunk, cfg):
+        row = texts.get(chunk["id"])
+        if row is None:
             continue
-        success = _two_phase_promote(chunk, proj, pdir, cfg, dry_run)
-        if success:
+        shared = (_field(chunk, "pinned", 0) == 1
+                  and (_field(chunk, "scope", "project") or "project") == "general")
+        reason = globalpool.veto(row.get("text", ""), cfg, tokens, shared=shared)
+        if reason:
+            vetoed.append((reason, chunk["id"]))
+            continue
+        if not dry_run and (gpdir / "lancedb").is_dir():
+            _, g_tbl = _open_global_lance(cfg)
+            gid = globalpool.find_duplicate(g_tbl, row.get("vector"), cfg)
+            if gid:
+                globalpool.join(gpdir, gid, proj, chunk["id"], pdir)
+                promoted += 1
+                continue
+        if _two_phase_promote(chunk, proj, pdir, cfg, dry_run, refresh=False):
             promoted += 1
+            copied += 1
 
-    if promoted:
-        log.info("global: promoted %d chunk(s) from project %s", promoted, proj)
+    if vetoed and not dry_run:
+        meta = _open_meta_direct(pdir)
+        try:
+            meta.executemany("UPDATE chunks SET global_veto = ? WHERE id = ? AND project = ?",
+                             [(r, cid, proj) for r, cid in vetoed])
+            meta.commit()
+        finally:
+            meta.close()
+    if copied and not dry_run:
+        _, g_tbl = _open_global_lance(cfg)
+        if g_tbl is not None:
+            refresh_fts(g_tbl)
+    if promoted or vetoed:
+        log.info("global: %d chunk(s) pooled from project %s, %d kept local by the veto",
+                 promoted, proj, len(vetoed))
 
     return promoted
 
@@ -1075,7 +1206,8 @@ def _stage2c_core_proposals(pdir: Path, proj: str, cfg: dict, dry_run: bool) -> 
     Candidates: live, trusted (no tool/web taint), short decisions, lessons,
     schemas or pinned chunks recalled at least core.propose_min_retrievals
     times. Each lands in the proposal queue for /biss-brain:core review; a
-    rejected proposal has the same id and is never queued again.
+    rejected proposal has the same id and is never queued again. A memory
+    whose pool copy several projects wrote is left to the global pass.
     """
     import core
 
@@ -1083,10 +1215,11 @@ def _stage2c_core_proposals(pdir: Path, proj: str, cfg: dict, dry_run: bool) -> 
     limit = int(ccfg.get("proposals_per_dream", 5))
     if limit <= 0 or proj == GLOBAL_PROJECT_HASH:
         return 0
+    global_ids = {r["id"] for r in globalpool.widely_written()} if _pool_on(cfg) else set()
     conn = _open_meta_direct(pdir)
     try:
         rows = conn.execute(
-            "SELECT id, kind, pinned, source, trust, taint FROM chunks "
+            "SELECT id, kind, pinned, source, trust, taint, global_id FROM chunks "
             "WHERE project = ? AND superseded_by = '' AND retrieval_count >= ? "
             "AND (kind IN ('decision', 'lesson', 'schema') OR pinned = 1) "
             f"AND kind NOT IN ('quarantine', 'hypothesis') AND {provenance.trusted_sql()} "
@@ -1109,6 +1242,8 @@ def _stage2c_core_proposals(pdir: Path, proj: str, cfg: dict, dry_run: bool) -> 
         existing = set()
     queued = 0
     for r in rows:
+        if r["global_id"] and r["global_id"] in global_ids:
+            continue
         text = " ".join((text_of.get(r["id"]) or "").split())
         if not text or len(text) > _CORE_MAX_CHARS or text.lower() in existing:
             continue
@@ -1119,6 +1254,51 @@ def _stage2c_core_proposals(pdir: Path, proj: str, cfg: dict, dry_run: bool) -> 
             section = _CORE_SECTION.get(r["kind"], "Pinned")
             if core.propose(proj, "add", "dream", provenance.label(prov),
                             section=section, text=text, chunk_id=r["id"]):
+                queued += 1
+        if queued >= limit:
+            break
+    return queued
+
+
+def _pool_on(cfg: dict) -> bool:
+    return bool(cfg.get("cross_project", {}).get("enabled", False))
+
+
+def _core_proposals_global(cfg: dict, dry_run: bool) -> int:
+    """Suggest shared-pool memories for the global core layer. Never writes core.
+
+    Candidates: live, trusted pool rows that two or more projects wrote, the
+    pool's own evidence that a lesson outlives one project; short, and not in
+    _global.md already. They queue under the pool's hash, so /biss-brain:core
+    review shows them in every project and accepting one writes _global.md.
+    """
+    import core
+
+    limit = int(cfg.get("core", {}).get("proposals_per_dream", 5))
+    if limit <= 0 or not _pool_on(cfg):
+        return 0
+    rows = globalpool.widely_written()
+    tbl = globalpool._pool_table() if rows else None
+    if tbl is None:
+        return 0
+    text_of = {r["id"]: r.get("text", "") for r in fetch_by_ids(tbl, [r["id"] for r in rows], limit=len(rows))}
+    try:
+        gfile = core.global_file()
+        existing = ({" ".join(it.text.split()).lower() for it in core.load(gfile).items()}
+                    if gfile.exists() else set())
+    except Exception:  # noqa: BLE001 — unreadable: dedup by proposal id only
+        existing = set()
+    queued = 0
+    for r in rows:
+        text = " ".join((text_of.get(r["id"]) or "").split())
+        if not text or len(text) > _CORE_MAX_CHARS or text.lower() in existing:
+            continue
+        if dry_run:
+            queued += 1
+        else:
+            prov = provenance.from_row(r["source"], r["trust"], r["taint"])
+            if core.propose(GLOBAL_PROJECT_HASH, "add", "dream", provenance.label(prov), layer="global",
+                            section=_CORE_SECTION.get(r["kind"], "Lessons"), text=text, chunk_id=r["id"]):
                 queued += 1
         if queued >= limit:
             break
@@ -1259,6 +1439,18 @@ def _run(args: argparse.Namespace, cfg: dict) -> int:
         if not args.dry_run:
             _record_state(pdir, "COMPLETE" if args.stage == "all" else f"STAGE{args.stage}")
         summary[proj] = s
+
+    # the shared pool after every project has promoted and retracted: one
+    # pass over all of it, never per project (its rows carry the pool's hash)
+    if args.stage in ("2", "all") and not args.project:
+        try:
+            summary["_global"] = globalpool.maintain(cfg, args.dry_run)
+        except Exception as e:  # noqa: BLE001
+            log.warning("pool upkeep failed: %s", e)
+        try:
+            summary.setdefault("_global", {})["core_proposed"] = _core_proposals_global(cfg, args.dry_run)
+        except Exception as e:  # noqa: BLE001
+            log.warning("global core proposals failed: %s", e)
 
     log.info("dream pass complete: %s", json.dumps(summary, default=str))
     return 0

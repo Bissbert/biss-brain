@@ -154,6 +154,40 @@ exclude = ["~", "~/Downloads", "~/Library", "~/.claude", "/tmp"]
 include_only = []
 # Per project: a `.biss-brain-ignore` file, or `.claude/brain.toml` with
 # `enabled = false`, in the project or any parent turns the hooks off there.
+# A directory outside git shares the store of its highest parent holding a
+# project marker (.biss-brain-root wins outright), never at or above $HOME or
+# one of these folders that hold projects rather than being one.
+generic_roots = ["~/Documents", "~/Desktop", "~/Downloads", "~/Developer", "~/sources",
+                 "~/src", "~/projects", "~/code", "~/dev", "~/repos", "~/work", "~/git"]
+
+[cross_project]
+# The shared pool. The distiller tags facts that hold in any project
+# scope=general; dream copies them into `_global` once they are
+# promote_after_hours old and pass a veto (secrets, paths, mail and IP
+# addresses, URLs, project names, more than veto_max_chars). Facts tainted by
+# tool or web output are never copied. Recall and MCP list pool hits above
+# recall.cosine_gate after the local results, labelled with their origin.
+enabled = true
+# "scope" (general facts plus what you shared), "pinned_only" (only what you
+# shared) or "off". Share one memory now with /biss-brain:share <id>.
+promote = "scope"
+promote_after_hours = 24
+veto_max_chars = 400
+# A fact this close to one already in the pool joins it instead of a new copy.
+dedup_cosine = 0.94
+# Each session arc may add up to three portable LESSON lines (scope=general).
+arc_lessons = true
+# Prompt inject from the pool: at most inject_max rows, only into a free slot,
+# only above inject_min_cosine. On the cross-project eval (nomic) answering pool
+# rows sit at cosine 0.62-0.86, so 0.88 rarely fires; off by default.
+inject = false
+inject_min_cosine = 0.88
+inject_max = 1
+# Pool rows rank below local memories of equal relevance.
+rank_multiplier = 0.8
+
+[cross_project.recall]
+cosine_gate = 0.85
 
 [core]
 # Core memory: curated notes injected in full at session start (see README).

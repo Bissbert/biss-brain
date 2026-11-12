@@ -457,9 +457,9 @@ def test_flow_global_admission(tmp_path, monkeypatch):
     conn.commit()
     conn.close()
 
-    # Also insert in LanceDB so _two_phase_promote can copy the vector
+    # Also insert in the project's LanceDB: promotion vets and copies the text
     vec = _fake_vec("lesson content for global admission test")
-    tbl = _make_lancedb_table(str(pdir), dim=DIM)
+    tbl = common_mod.open_or_create_chunks(pdir / "lancedb", DIM)
     tbl.add([{
         "id": chunk_id,
         "project": proj_hash,

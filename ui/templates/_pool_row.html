@@ -1,0 +1,29 @@
+{% set _n = row.projects | length %}
+<article class="card{% if not row.live %} is-superseded{% endif %}" id="pool-{{ row.id }}" data-chunk="{{ row.id }}">
+  <header class="card-head">
+    <span class="badge{% if row.kind in ('decision', 'lesson') %} accent{% endif %}">{{ row.kind }}</span>
+    <time class="card-ts" datetime="{{ row.ts }}">{{ row.ts | fmt_ts }}</time>
+    <span class="flag" title="{{ row.projects | join(', ') }}">
+      from {{ row.projects[0] if row.projects else "an unknown project" }}{% if _n > 1 %}, written in {{ _n }} projects{% endif %}
+    </span>
+    {% if not row.live %}<span class="flag flag-gone">not shared</span>{% endif %}
+    <span class="card-actions">
+      {% if row.live %}
+      <button type="button" data-action="share" aria-keyshortcuts="s"
+              title="Out of the pool; each project that wrote it keeps it"
+              hx-post="/api/pool/unshare?id={{ row.id }}"
+              hx-target="#pool-{{ row.id }}" hx-swap="outerHTML">Unshare</button>
+      {% endif %}
+    </span>
+  </header>
+  <div class="card-body">{{ row.text[:400] }}{% if row.text | length > 400 %}…{% endif %}</div>
+  {% if just_unshared %}
+  <p class="card-undo" role="status">
+    Out of the pool. {{ "Each project that wrote it keeps" if _n > 1 else "The project that wrote it keeps" }} it,
+    and no dream shares it again.
+    <button type="button" autofocus data-action="restore"
+            hx-post="/api/pool/restore?id={{ row.id }}"
+            hx-target="#pool-{{ row.id }}" hx-swap="outerHTML">Undo</button>
+  </p>
+  {% endif %}
+</article>

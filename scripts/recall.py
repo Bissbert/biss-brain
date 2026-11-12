@@ -18,11 +18,9 @@ import json
 
 import lancedb as _lancedb_pkg
 
-import lance_filter as F
 import common
 from common import (
     BRAIN_ROOT,
-    GLOBAL_PROJECT_HASH,
     embed,
     lancedb_dir,
     load_config,
@@ -30,9 +28,7 @@ from common import (
     open_meta,
     project_key,
     scoped,
-    vector_search,
 )
-import provenance
 import temporal
 from effects import apply_post_retrieval
 from retrieve import retrieve
@@ -65,118 +61,22 @@ def _open_global_lance():
         return None, None
 
 
-def _global_source_label(chunk_id: str) -> str:
-    """Look up the source project label for a globally-promoted chunk.
-
-    Reads the global meta.sqlite to find the original source_project hash,
-    then reads that project's project_path.txt. Falls back to the hash or
-    '__global__' if not found.
-    """
-    try:
-        global_pdir = BRAIN_ROOT / "_global"
-        db_path = global_pdir / "meta.sqlite"
-        if not db_path.exists():
-            return "__global__"
-        import sqlite3 as _sqlite3
-        conn = _sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-        # project column in global store holds GLOBAL_PROJECT_HASH;
-        # we read back the raw_ref or agent_id which may encode source project.
-        # For v0.5, the source project label is stored in project_path.txt.
-        # The simplest approach: iterate all project dirs and find one whose
-        # meta.sqlite has this chunk_id with cross_eligible=1.
-        conn.close()
-    except Exception:  # noqa: BLE001
-        pass
-
-    # Walk project dirs to find which one owns this chunk
-    try:
-        for d in sorted(BRAIN_ROOT.iterdir()):
-            if not d.is_dir():
-                continue
-            name = d.name
-            if len(name) != 12 or not all(c in "0123456789abcdef" for c in name):
-                continue
-            db_path = d / "meta.sqlite"
-            if not db_path.exists():
-                continue
-            import sqlite3 as _sqlite3
-            conn = _sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
-            try:
-                row = conn.execute(
-                    "SELECT id FROM chunks WHERE id=? AND cross_eligible=1", (chunk_id,)
-                ).fetchone()
-                if row:
-                    label_file = d / "project_path.txt"
-                    if label_file.exists():
-                        return label_file.read_text().strip() or name
-                    return name
-            finally:
-                conn.close()
-    except Exception:  # noqa: BLE001
-        pass
-    return "__global__"
-
-
 def _recall_global(query_embedding: list[float], cfg: dict) -> list[dict]:
-    """Fan-out recall to the _global LanceDB store.
+    """Fan-out recall to the _global pool (retrieve.global_candidates).
 
-    Called AFTER local recall. Returns results that pass the cosine gate
-    cfg["cross_project"]["recall"]["cosine_gate"] (default 0.85).
-
-    Each result is annotated with:
-      - source_project: human-readable label from project_path.txt
-      - _is_cross_project: True (always, for caller discrimination)
+    Called AFTER local recall. Returns up to 10 rows that pass the cosine gate
+    cfg["cross_project"]["recall"]["cosine_gate"] (default 0.85), each with
+    source_project (where it came from) and _is_cross_project=True.
 
     R3 invariant: does NOT bump retrieval_count_local for cross-project hits.
     """
-    if not cfg.get("cross_project", {}).get("enabled", False):
+    from retrieve import global_candidates  # noqa: PLC0415
+
+    gate = float(cfg.get("cross_project", {}).get("recall", {}).get("cosine_gate", 0.85))
+    _, tbl = _open_global_lance()
+    if tbl is None:
         return []
-
-    cosine_gate = cfg["cross_project"]["recall"]["cosine_gate"]
-
-    _, g_tbl = _open_global_lance()
-    if g_tbl is None:
-        return []
-
-    try:
-        raw = vector_search(g_tbl, query_embedding, F.and_(F.LIVE, F.NOT_HYPOTHESIS, F.NOT_QUARANTINE), 10)
-    except Exception:  # noqa: BLE001
-        return []
-    provs = _global_provs([r["id"] for r in raw])
-
-    results = []
-    for row in raw:
-        cosine = row["_cosine"]
-        if cosine < cosine_gate:
-            continue
-        # Annotate with source_project label (R4: never touch related_ids)
-        source_label = _global_source_label(row["id"])
-        annotated = dict(row)
-        annotated["source_project"] = source_label
-        annotated["_is_cross_project"] = True
-        annotated["_cosine"] = cosine
-        annotated["_prov"] = provs.get(row["id"])
-        annotated["_source"] = provenance.label(annotated["_prov"])
-        results.append(annotated)
-
-    return results
-
-
-def _global_provs(ids: list[str]) -> dict:
-    """Provenance of _global rows; empty when the global meta is unreadable."""
-    path = BRAIN_ROOT / "_global" / "meta.sqlite"
-    if not ids or not path.exists():
-        return {}
-    import sqlite3  # noqa: PLC0415
-
-    try:
-        conn = sqlite3.connect(f"file:{path}?mode=ro", uri=True)
-    except sqlite3.Error:
-        return {}
-    try:
-        return provenance.lookup(conn, GLOBAL_PROJECT_HASH, ids)
-    finally:
-        conn.close()
+    return global_candidates("", query_embedding, cfg, 10, min_cosine=gate, tbl=tbl)
 
 
 def _write_cross_link(

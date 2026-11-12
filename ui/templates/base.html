@@ -413,8 +413,9 @@
     {% endif %}
     <div class="nav-links">
       {% for href, name in [("/", "Overview"), ("/search", "Search"), ("/review", "Review"),
-                            ("/sessions", "Sessions"), ("/timeline", "Timeline"), ("/status", "Status")] %}
-      {% if current_project or href in ("/", "/search") %}
+                            ("/sessions", "Sessions"), ("/timeline", "Timeline"), ("/status", "Status"),
+                            ("/pool", "Shared")] %}
+      {% if current_project or href in ("/", "/search", "/pool") %}
       {% set _on = _path == href or (href == "/sessions" and _path.startswith("/session/")) %}
       <a href="{{ href }}{{ _q }}"{% if _on %} class="active" aria-current="page"{% endif %}>{{ name }}</a>
       {% endif %}
@@ -435,8 +436,9 @@
       <tr><td><kbd>o</kbd></td><td>Open or close its details</td></tr>
       <tr><td><kbd>p</kbd></td><td>Pin or unpin it</td></tr>
       <tr><td><kbd>f</kbd></td><td>Forget it (undo for 10 seconds)</td></tr>
+      <tr><td><kbd>s</kbd></td><td>Share it with every project, or take it back (with undo)</td></tr>
       <tr><td><kbd>c</kbd></td><td>Select it to compose</td></tr>
-      <tr><td><kbd>g</kbd> then <kbd>h</kbd> <kbd>r</kbd> <kbd>s</kbd> <kbd>t</kbd></td><td>Overview, Review, Sessions, Timeline</td></tr>
+      <tr><td><kbd>g</kbd> then <kbd>h</kbd> <kbd>r</kbd> <kbd>s</kbd> <kbd>t</kbd> <kbd>p</kbd></td><td>Overview, Review, Sessions, Timeline, Shared</td></tr>
       <tr><td><kbd>?</kbd></td><td>This help</td></tr>
     </table>
     <h2>Terms</h2>

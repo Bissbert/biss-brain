@@ -9,6 +9,10 @@
 {% set _forgotten = chunk.forgotten | default(false) %}
 {% set _replaced_by = chunk.replaced_by | default("") %}
 {% set _replaces = chunk.replaces | default([]) %}
+{# sharing: a live, first-party memory of a project store, of a kind that may leave it #}
+{% set _shared = chunk.cross_eligible | default(false) %}
+{% set _can_share = project != pool_hash and not chunk.is_superseded
+                    and chunk.kind not in never_pooled and chunk.source not in ('web', 'tool') %}
 
 <article class="card{% if chunk.is_superseded %} is-superseded{% endif %}{% if just_forgotten %} expanded{% endif %}"
          id="chunk-{{ chunk.id }}" data-chunk="{{ chunk.id }}">
@@ -23,6 +27,9 @@
     {% endif %}
     <time class="card-ts" datetime="{{ chunk.ts }}">{{ chunk.ts | fmt_ts }}</time>
     {% if chunk.pinned %}<span class="flag flag-keep">pinned</span>{% endif %}
+    {% if _shared and not chunk.is_superseded and project != pool_hash %}
+    <span class="flag flag-keep" title="In the shared pool: every project can recall it">shared</span>
+    {% endif %}
     {% if _is_labile %}
     <span class="badge badge-labile" title="Open to revision until {{ _labile | fmt_ts }}">labile</span>
     {% endif %}
@@ -46,6 +53,16 @@
               hx-post="/api/{{ 'unpin' if chunk.pinned else 'pin' }}?project={{ project }}&id={{ chunk.id }}"
               hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">{{ 'Unpin' if chunk.pinned else 'Pin' }}</button>
       {% endif %}
+      {% if _shared and _can_share %}
+      <button type="button" data-action="share" aria-keyshortcuts="s"
+              hx-post="/api/unshare?project={{ project }}&id={{ chunk.id }}"
+              hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">Unshare</button>
+      {% elif _can_share %}
+      <button type="button" data-action="share" aria-keyshortcuts="s"{% if share_refused %} autofocus{% endif %}
+              title="Pin it and let every project recall it"
+              hx-post="/api/share?project={{ project }}&id={{ chunk.id }}"
+              hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">Share</button>
+      {% endif %}
       {% if inline_forget and not chunk.is_superseded %}
       <button type="button" class="danger"
               hx-post="/api/forget?project={{ project }}&id={{ chunk.id }}"
@@ -67,6 +84,25 @@
             hx-post="/api/unforget?project={{ project }}&id={{ chunk.id }}"
             hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">Undo</button>
   </p>
+  {% endif %}
+
+  {% if just_shared %}
+  <p class="card-undo" role="status">
+    {% if just_shared == "shared" %}Shared with every project, and pinned here.
+    {% else %}Marked to share. Sharing is off in config.toml, so it stays here until it is on.{% endif %}
+    <button type="button" autofocus data-action="unshare"
+            hx-post="/api/unshare?project={{ project }}&id={{ chunk.id }}&pinned={{ prior.pinned }}&scope={{ prior.scope }}"
+            hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">Undo</button>
+  </p>
+  {% elif just_unshared %}
+  <p class="card-undo" role="status">
+    Kept in this project only. No other project recalls it, and no dream shares it again.
+    <button type="button" autofocus data-action="reshare"
+            hx-post="/api/share?project={{ project }}&id={{ chunk.id }}"
+            hx-target="#chunk-{{ chunk.id }}" hx-swap="outerHTML">Undo</button>
+  </p>
+  {% elif share_refused %}
+  <p class="card-undo" role="status">{{ share_refused }}</p>
   {% endif %}
 
   <div class="card-more" id="more-{{ chunk.id }}">

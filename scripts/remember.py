@@ -211,6 +211,11 @@ def main() -> int:
     layer.add_argument("--global", dest="global_", action="store_true",
                        help="With --core: _global.md, injected in every project.")
     p.add_argument(
+        "--share",
+        action="store_true",
+        help="Also share it with every project now (the shared pool). User-typed only.",
+    )
+    p.add_argument(
         "--section",
         choices=["decisions", "conventions", "lessons", "pinned"],
         default=None,
@@ -237,6 +242,13 @@ def main() -> int:
         print(f"error: {e}", file=sys.stderr)
         return 1
     print(chunk_id)
+    if args.share:
+        if args.source != "user":
+            print("not shared: only the user shares a memory", file=sys.stderr)
+            return 0
+        import globalpool  # noqa: PLC0415
+        status, _ = globalpool.share(project_key(os.getcwd()), chunk_id, load_config())
+        print("shared with every project" if status == "shared" else f"not shared: {status}")
     return 0
 
 

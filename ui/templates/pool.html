@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Shared{% endblock %}
+{% block head_extra %}
+<style>
+  .pool-lede { color: var(--muted); max-width: 68ch; line-height: 1.55; margin: 4px 0 32px; }
+  .pool-lede code { font-size: 0.8125rem; }
+  .pool-count { font-family: var(--font-mono); font-size: 0.8125rem; color: var(--label); font-weight: 400; }
+  .pool-empty { color: var(--label); font-size: 0.875rem; max-width: 68ch; line-height: 1.55; }
+</style>
+{% endblock %}
+{% block content %}
+<h1>Shared <span class="pool-count">{{ rows | length }}{% if rows | length >= limit %}+{% endif %}</span></h1>
+<p class="pool-lede">Memories every project can recall: general lessons the nightly dream moved here, and
+  what you shared yourself. A shared memory shows up below a project's own when it matches well. Unshare
+  takes one out; the projects that wrote it keep their copy. Share from a memory's card, or with
+  <code>/biss-brain:share &lt;id&gt;</code> in a session.</p>
+{% if rows %}
+<div class="pool-list">
+  {% for row in rows %}{% include "_pool_row.html" %}{% endfor %}
+</div>
+{% else %}
+<p class="pool-empty">Nothing is shared yet. The nightly dream shares general lessons a day after they are
+  written; anything that names a project, a path, an address or a secret stays where it was written.</p>
+{% endif %}
+{% endblock %}

@@ -6,12 +6,14 @@
  *   j / k   next / prev card (highlights with .is-current)
  *   p       toggle pin on current card
  *   f       forget current card (Undo appears on the card for 10 s)
+ *   s       share current card with every project, or unshare it (Undo on the card)
  *   o       open or close the current card's details
  *   c       toggle compose checkbox on current card
  *   g s     navigate to /sessions
  *   g t     navigate to /timeline
  *   g h     navigate to / (home)
  *   g r     navigate to /review
+ *   g p     navigate to /pool (shared memories)
  *   ?       open the shortcuts and terms dialog
  *   Escape  clear focus / close compose drawer
  *
@@ -177,6 +179,7 @@
         case "t": e.preventDefault(); _goTo("/timeline"); return;
         case "h": e.preventDefault(); _goTo("/"); return;
         case "r": e.preventDefault(); _goTo("/review"); return;
+        case "p": e.preventDefault(); _goTo("/pool"); return;
       }
       return;
     }
@@ -213,11 +216,12 @@
 
       case "p":
       case "f":
+      case "s":
       case "o": {
         e.preventDefault();
         var card = _currentCard();
         if (!card) return;
-        var action = { p: "pin", f: "forget", o: "toggle" }[e.key];
+        var action = { p: "pin", f: "forget", s: "share", o: "toggle" }[e.key];
         var btn = card.querySelector('button[data-action="' + action + '"]');
         if (btn) btn.click();
         return;
